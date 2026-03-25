@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "exa": {
+      "name": "Exa",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=exa",
+      "source": "skillhub",
+      "version": "0.0.2"
+    },
+    "multi-search-engine": {
+      "name": "Multi Search Engine",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=multi-search-engine",
+      "source": "skillhub",
+      "version": "2.0.1"
+    },
+    "tavily": {
+      "name": "Tavily AI Search",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=tavily",
+      "source": "skillhub",
+      "version": "1.0.0"
+    }
+  }
+}
