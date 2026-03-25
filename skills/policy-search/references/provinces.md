@@ -1,0 +1,35 @@
+# 省份域名对照表
+
+| 省份 | 网站域名 |
+|------|----------|
+| 北京市 | https://www.beijing.gov.cn |
+| 天津市 | https://www.tj.gov.cn |
+| 河北省 | https://www.hebei.gov.cn |
+| 山西省 | https://www.shanxi.gov.cn |
+| 内蒙古 | https://www.nmg.gov.cn |
+| 辽宁省 | https://www.ln.gov.cn |
+| 吉林省 | https://www.jl.gov.cn |
+| 黑龙江省 | https://www.hlj.gov.cn |
+| 上海市 | https://www.shanghai.gov.cn |
+| 江苏省 | https://www.jiangsu.gov.cn |
+| 浙江省 | https://www.zj.gov.cn |
+| 安徽省 | https://www.ah.gov.cn |
+| 福建省 | https://www.fujian.gov.cn |
+| 江西省 | https://www.jiangxi.gov.cn |
+| 山东省 | http://www.shandong.gov.cn |
+| 河南省 | https://www.henan.gov.cn |
+| 湖北省 | https://www.hubei.gov.cn |
+| 湖南省 | https://www.hunan.gov.cn |
+| 广东省 | https://www.gd.gov.cn |
+| 广西 | http://www.gxzf.gov.cn |
+| 海南省 | https://www.hainan.gov.cn |
+| 重庆市 | https://www.cq.gov.cn |
+| 四川省 | https://www.sc.gov.cn |
+| 贵州省 | https://www.guizhou.gov.cn |
+| 云南省 | https://www.yn.gov.cn |
+| 西藏 | https://www.xizang.gov.cn |
+| 陕西省 | https://www.shaanxi.gov.cn |
+| 甘肃省 | https://www.gansu.gov.cn |
+| 青海省 | http://www.qinghai.gov.cn |
+| 宁夏 | https://www.nx.gov.cn |
+| 新疆 | https://www.xinjiang.gov.cn |
