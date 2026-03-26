@@ -1,82 +1,87 @@
 ---
 name: policy-dedup-curator
-description: 中国政策去重清洗技能。用于读取 policy-database/raw 或 normalized 中的多技能政策结果，统一字段、按原文地址去重、按标题相似度去重、按来源优先级排序，并输出到 policy-database/curated。适用于把多个政策搜索技能采集到的原始结果整理成可查询、可汇总的数据层时使用。
+description: 中国政策去重清洗技能。用于读取多个搜索技能产出的 Excel/CSV/JSON 结果，统一字段，并以“原文地址”为唯一 URL 去重键进行去重清洗；最终只保留标题、摘要、原文链接三项必填记录，输出轻量政策库到桌面政策库文件夹。适用于把多个政策搜索技能采集到的原始结果整理成最终政策库时使用。
 ---
 
 # Policy Dedup Curator
 
 ## 目标
 
-把多个技能采集到的原始政策结果，整理成统一、可查询、可汇总的数据层。
+把多个技能采集到的原始政策结果，整理成统一、轻量、可查询的最终政策库。
 
-## 输入层
+## 最终输出要求
 
-优先读取：
-- `policy-database/raw/{year}/{province}/`
+最终政策库中的每条记录，以下三项 **必须存在且不能为空**：
+- 标题
+- 摘要
+- 原文链接
 
-可选读取：
-- `policy-database/normalized/{year}/{province}/`
+不满足这三项的记录：
+- 直接丢弃
+- 不进入最终政策库
 
-## 输出层
+## 去重规则
 
-输出到：
-- `policy-database/normalized/{year}/{province}/`
-- `policy-database/curated/{year}/{province}/`
+第一版只做一条硬规则：
 
-## 标准化字段
+### 用“原文地址 / 原文链接”做 URL 去重
+- 去重键必须是 **原文地址**
+- 如果多个技能搜到同一原文地址，只保留一条
+- 不要用搜索页地址或跳转页地址做去重键
 
-统一为以下字段：
-- title
-- content
-- summary
-- source_name
-- source_url
-- published_at
-- province
-- city
-- year
-- theme
-- doc_type
-- source_skill
-- source_type
-- hit_method
-- collected_at
-- raw_file
-- note
+## 输入支持
 
-## 去重流程
+支持读取：
+- `.xlsx`
+- `.csv`
+- `.json`
 
-### 1. URL 去重
-- 原文地址相同 → 视为同一条
-- 优先保留来源更权威、字段更完整的那条
+支持输入单个文件或整个目录。
 
-### 2. 标题相似度去重
-- 标题高度相似时，判断是否为同一政策
-- 原始政策正文优先于转载/解读
-- 省政府/厅局优先于媒体/聚合页
+## 字段映射
 
-### 3. 来源优先级排序
-建议顺序：
-1. 省政府 / 办公厅 / 政府公报
-2. 厅局 / 委办局
-3. 地市 / 区县政府
-4. 官方平台 / 专题页
-5. 官方媒体 / 权威转载
-6. 其他来源
+至少兼容这些字段名：
+- 标题 / title
+- 摘要 / summary / 正文 / content
+- 原文地址 / 原文链接 / url / source_url / link
 
-### 4. 分类保留
-清洗后可至少分为：
-- 正式政策
-- 官方解读/转载
+## 输出位置
 
-## 输出建议
+最终结果统一输出到：
+- `~/Desktop/政策库文件夹/`
 
-每个省份至少输出：
-- `normalized_records.xlsx` / `normalized_records.json`
-- `curated_records.xlsx` / `curated_records.json`
+## 第一版输出字段
 
-## 说明
+默认输出精简字段：
+- 标题
+- 摘要
+- 原文链接
+- 来源地方（若有）
+- 发布时间（若有）
 
-- `raw` 层永远保留，不覆盖
-- 清洗规则可以反复演进
-- 任何时候都要能从 `raw` 重新计算 `normalized` 和 `curated`
+其中前 3 项为硬必填。
+
+## 脚本
+
+使用：
+`skills/policy-dedup-curator/scripts/curate_policy_library.py`
+
+示例：
+```bash
+python3 skills/policy-dedup-curator/scripts/curate_policy_library.py \
+  --input policy-database/raw/2026/广东 \
+  --output ~/Desktop/政策库文件夹/广东_2026_政策库.xlsx \
+  --log ~/Desktop/政策库文件夹/广东_2026_清洗日志.json
+```
+
+## 第一版范围说明
+
+第一版优先完成：
+1. 读取多个来源文件
+2. 字段统一
+3. 三个必填字段校验
+4. 按原文地址去重
+5. 导出最终政策库 Excel
+6. 输出简单日志
+
+标题相似度去重可以放到后续版本补强。
