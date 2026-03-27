@@ -181,11 +181,7 @@ def is_relevant_content(result, core_terms):
 
 def main():
     keyword = sys.argv[1] if len(sys.argv) > 1 else "2026年 政策"
-    debug_dir = Path.home() / "Desktop" / "搜索配置文件夹"
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    debug_log = debug_dir / "exa-search-debug.log"
-    with debug_log.open('a', encoding='utf-8') as f:
-        f.write(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] keyword={keyword}\n")
+    debug_log = None
 
     if len(sys.argv) > 2:
         p_name = sys.argv[2]
@@ -199,10 +195,7 @@ def main():
             target_provinces[p_name] = p_domain
 
     query_variants, core_terms = build_theme_queries(keyword)
-    with debug_log.open('a', encoding='utf-8') as f:
-        f.write(f"  core_terms={core_terms}\n")
-        for q in query_variants:
-            f.write(f"  query_variant={q}\n")
+    # 关闭桌面调试日志落盘，保留标准输出即可
 
     print(f"""
 ╔════════════════════════════════════════════════════════════╗
@@ -219,12 +212,8 @@ def main():
         print(f"\n🔍 搜索 {province_name} ({domain})...")
         seen_urls = {}
         for query in query_variants:
-            with debug_log.open('a', encoding='utf-8') as f:
-                f.write(f"  province={province_name} domain={domain} actual_query={query}\n")
             results = search_exa(query, domain, num_results=15)
             filtered = [r for r in results if is_relevant_result(r, core_terms)]
-            with debug_log.open('a', encoding='utf-8') as f:
-                f.write(f"    raw_count={len(results)} filtered_count={len(filtered)}\n")
             for r in filtered:
                 url = r.get('url', '')
                 if url and url not in seen_urls:
