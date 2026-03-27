@@ -1,6 +1,6 @@
 ---
 name: policy-harvest-orchestrator
-description: 中国政策采集编排技能。用于按“年份 + 省份/城市 + 主题”组织政策数据采集，统一调度 jinzhen-policy-search、cn-policy-multi-search、exa-web-search-free 等搜索技能，把各自原始结果保存到 policy-database/raw 分层目录，并记录采集日志。适用于构建省级/全国政策原始数据池时使用。
+description: 中国政策采集编排技能。用于按“年份 + 省份/城市 + 主题”组织政策数据采集，统一调度 jinzhen-policy-search、cn-policy-multi-search、exa-web-search-free 等搜索技能，把各自原始结果分层保存到桌面原始数据文件夹，并记录采集日志。适用于构建省级/全国政策原始数据池时使用。
 ---
 
 # Policy Harvest Orchestrator
@@ -11,11 +11,11 @@ description: 中国政策采集编排技能。用于按“年份 + 省份/城市
 
 ## 默认输出目录
 
-原始结果统一保存到：
-`policy-database/raw/{year}/{province}/{skill-name}/`
+原始结果统一保存到桌面原始数据文件夹，例如：
+`~/Desktop/原始数据/{year}/{province}/{skill-name}/`
 
 日志保存到：
-`policy-database/logs/`
+`~/Desktop/原始数据/logs/`
 
 ## 推荐采集顺序
 
@@ -36,9 +36,9 @@ description: 中国政策采集编排技能。用于按“年份 + 省份/城市
 
 ### 2. 创建目录
 按以下结构创建目录：
-- `policy-database/raw/{year}/{province}/jinzhen-policy-search/`
-- `policy-database/raw/{year}/{province}/cn-policy-multi-search/`
-- `policy-database/raw/{year}/{province}/exa-web-search-free/`
+- `~/Desktop/原始数据/{year}/{province}/jinzhen-policy-search/`
+- `~/Desktop/原始数据/{year}/{province}/cn-policy-multi-search/`
+- `~/Desktop/原始数据/{year}/{province}/exa-web-search-free/`
 
 ### 3. 逐个技能采集
 对每个技能：
@@ -57,7 +57,7 @@ description: 中国政策采集编排技能。用于按“年份 + 省份/城市
 - note
 
 可写入：
-- `policy-database/logs/harvest-history.jsonl`
+- `~/Desktop/原始数据/logs/harvest-history.jsonl`
 
 ## 采集原则
 
