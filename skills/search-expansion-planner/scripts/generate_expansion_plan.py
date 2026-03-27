@@ -40,8 +40,19 @@ GENERIC_POLICY_SUFFIXES = [
 STOPWORDS = [
     "帮我搜索", "帮我查找", "帮我查", "搜索", "查找", "查一下", "查",
     "湖北省内", "省内", "所有的", "所有", "相关内容", "相关政策", "政策", "内容",
-    "关于", "有关", "内", "年"
+    "关于", "有关", "方面", "方面的", "领域", "领域的", "相关", "内", "年", "的"
 ]
+
+NORMALIZE_MAP = {
+    "教育方面": "教育",
+    "教育领域": "教育",
+    "教育相关": "教育",
+    "教育方面的": "教育",
+    "农业方面": "农业",
+    "农业领域": "农业",
+    "新能源方面": "新能源",
+    "博物馆方面": "博物馆"
+}
 
 
 def load_templates():
@@ -93,9 +104,13 @@ def extract_generic_theme(text: str, province: str, year: str) -> str:
     cleaned = cleaned.replace(province.replace("省", ""), "")
     cleaned = cleaned.replace(f"{year}年", "")
     cleaned = cleaned.replace(year, "")
+    for src, dst in NORMALIZE_MAP.items():
+        cleaned = cleaned.replace(src, dst)
     for word in STOPWORDS:
         cleaned = cleaned.replace(word, "")
     cleaned = re.sub(r"[，。、；：,.!?？\s]+", "", cleaned)
+    cleaned = re.sub(r"^(关于|有关)+", "", cleaned)
+    cleaned = re.sub(r"(相关|方面|领域)+$", "", cleaned)
     if not cleaned:
         return DEFAULT_THEME_LABEL
     return cleaned

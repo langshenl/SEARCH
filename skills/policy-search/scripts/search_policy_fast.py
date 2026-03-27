@@ -290,6 +290,7 @@ def main():
             "结果": relevant_results
         }, f, ensure_ascii=False, indent=2)
     print(f"✅ JSON: {json_file}")
+    print(f"RESULT_JSON: {json_file}")
 
     try:
         import openpyxl
