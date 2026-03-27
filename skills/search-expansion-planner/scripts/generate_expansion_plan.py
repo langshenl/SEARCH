@@ -11,7 +11,7 @@ TEMPLATES_PATH = BASE_DIR / "references" / "theme_templates.json"
 OUTPUT_DIR = Path.home() / "Desktop" / "搜索配置文件夹"
 OUTPUT_PATH = OUTPUT_DIR / "current-expansion-plan.csv"
 DEFAULT_PROVINCE = "湖北省"
-DEFAULT_THEME = "农业政策"
+DEFAULT_THEME_LABEL = "通用主题"
 
 PROVINCES = [
     "北京市", "天津市", "上海市", "重庆市",
@@ -28,6 +28,18 @@ PROVINCES = [
     "河南", "湖北", "湖南", "广东", "海南",
     "四川", "贵州", "云南", "陕西", "甘肃", "青海",
     "台湾", "内蒙古", "广西", "西藏", "宁夏", "新疆", "香港", "澳门"
+]
+
+GENERIC_POLICY_SUFFIXES = [
+    "扶持政策", "发展政策", "建设政策", "管理政策", "服务政策",
+    "保障政策", "改革政策", "创新政策", "提升政策", "监管政策",
+    "数字化政策", "人才政策", "财政支持政策", "运营政策", "实施政策"
+]
+
+STOPWORDS = [
+    "帮我搜索", "帮我查找", "帮我查", "搜索", "查找", "查一下", "查",
+    "湖北省内", "省内", "所有的", "所有", "相关内容", "相关政策", "政策", "内容",
+    "关于", "有关", "内", "年"
 ]
 
 
@@ -63,7 +75,7 @@ def extract_province(text: str) -> str:
     return DEFAULT_PROVINCE
 
 
-def detect_theme(text: str, templates: dict) -> str:
+def detect_template_theme(text: str, templates: dict):
     lowered = text.strip()
     for theme, meta in templates.items():
         if theme in lowered:
@@ -71,11 +83,49 @@ def detect_theme(text: str, templates: dict) -> str:
         for alias in meta.get("aliases", []):
             if alias in lowered:
                 return theme
-    return DEFAULT_THEME
+    return None
 
 
-def build_rows(user_query: str, year: str, province: str, theme: str, templates: dict):
-    expansions = templates[theme]["expansions"]
+def extract_generic_theme(text: str, province: str, year: str) -> str:
+    cleaned = text
+    cleaned = cleaned.replace(province, "")
+    cleaned = cleaned.replace(province.replace("省", ""), "")
+    cleaned = cleaned.replace(f"{year}年", "")
+    cleaned = cleaned.replace(year, "")
+    for word in STOPWORDS:
+        cleaned = cleaned.replace(word, "")
+    cleaned = re.sub(r"[，。、；：,.!?？\s]+", "", cleaned)
+    if not cleaned:
+        return DEFAULT_THEME_LABEL
+    return cleaned
+
+
+def build_generic_expansions(theme: str):
+    if theme == DEFAULT_THEME_LABEL:
+        return [
+            "专题政策", "扶持政策", "发展政策", "管理政策", "实施政策",
+            "财政支持政策", "人才政策", "数字化政策"
+        ]
+    expansions = []
+    for suffix in GENERIC_POLICY_SUFFIXES:
+        expansions.append(f"{theme}{suffix}")
+    expansions.extend([
+        f"{theme}公共服务政策",
+        f"{theme}资源保护政策",
+        f"{theme}文旅融合政策",
+        f"{theme}场馆建设政策",
+        f"{theme}教育推广政策"
+    ])
+    deduped = []
+    seen = set()
+    for item in expansions:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
+
+def build_rows(user_query: str, year: str, province: str, theme: str, expansions):
     rows = []
     for item in expansions:
         rows.append({
@@ -113,14 +163,25 @@ def main():
 
     year = extract_year(user_query)
     province = extract_province(user_query)
-    theme = detect_theme(user_query, templates)
-    rows = build_rows(user_query, year, province, theme, templates)
+    template_theme = detect_template_theme(user_query, templates)
+
+    if template_theme:
+        theme = template_theme
+        expansions = templates[theme]["expansions"]
+        mode = "template"
+    else:
+        theme = extract_generic_theme(user_query, province, year)
+        expansions = build_generic_expansions(theme)
+        mode = "generic"
+
+    rows = build_rows(user_query, year, province, theme, expansions)
     write_csv(rows)
 
     print(f"已生成扩展表：{OUTPUT_PATH}")
     print(f"年份：{year}")
     print(f"地区：{province}")
     print(f"主题：{theme}")
+    print(f"模式：{mode}")
     print(f"扩展数量：{len(rows)}")
 
 
