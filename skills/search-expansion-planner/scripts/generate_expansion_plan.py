@@ -31,6 +31,18 @@ PROVINCES = [
     "台湾", "内蒙古", "广西", "西藏", "宁夏", "新疆", "香港", "澳门"
 ]
 
+NATIONAL_PROVINCES = [
+    "北京市", "天津市", "上海市", "重庆市",
+    "河北省", "山西省", "辽宁省", "吉林省", "黑龙江省",
+    "江苏省", "浙江省", "安徽省", "福建省", "江西省", "山东省",
+    "河南省", "湖北省", "湖南省", "广东省", "海南省",
+    "四川省", "贵州省", "云南省", "陕西省", "甘肃省", "青海省",
+    "内蒙古自治区", "广西壮族自治区", "西藏自治区",
+    "宁夏回族自治区", "新疆维吾尔自治区"
+]
+
+NATIONAL_DIRECTIONS = ["扶持政策", "发展政策", "建设政策"]
+
 GENERIC_POLICY_SUFFIXES = [
     "扶持政策", "发展政策", "建设政策", "管理政策", "服务政策",
     "保障政策", "改革政策", "创新政策", "提升政策", "监管政策",
@@ -47,6 +59,8 @@ STOPWORDS = [
 ALL_POLICY_PATTERNS = [
     "所有政策", "全部政策", "政策内容", "全省政策", "所有政策内容", "全部政策内容"
 ]
+
+NATIONAL_PATTERNS = ["全国", "中国", "全国范围", "全国各省", "全国各地"]
 
 NORMALIZE_MAP = {
     "教育方面": "教育",
@@ -97,6 +111,11 @@ def is_all_policy_request(text: str) -> bool:
     return any(pat in compact for pat in ALL_POLICY_PATTERNS)
 
 
+def is_national_request(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    return any(pat in compact for pat in NATIONAL_PATTERNS)
+
+
 def detect_template_theme(text: str, templates: dict):
     lowered = text.strip()
     for theme, meta in templates.items():
@@ -110,8 +129,11 @@ def detect_template_theme(text: str, templates: dict):
 
 def extract_generic_theme(text: str, province: str, year: str) -> str:
     cleaned = text
-    cleaned = cleaned.replace(province, "")
-    cleaned = cleaned.replace(province.replace("省", ""), "")
+    if province:
+        cleaned = cleaned.replace(province, "")
+        cleaned = cleaned.replace(province.replace("省", "").replace("市", ""), "")
+    cleaned = cleaned.replace("全国", "")
+    cleaned = cleaned.replace("中国", "")
     cleaned = cleaned.replace(f"{year}年", "")
     cleaned = cleaned.replace(year, "")
     for src, dst in NORMALIZE_MAP.items():
@@ -119,8 +141,9 @@ def extract_generic_theme(text: str, province: str, year: str) -> str:
     for word in STOPWORDS:
         cleaned = cleaned.replace(word, "")
     cleaned = re.sub(r"[，。、；：,.!?？\s]+", "", cleaned)
-    cleaned = re.sub(r"^(关于|有关)+", "", cleaned)
-    cleaned = re.sub(r"(相关|方面|领域)+$", "", cleaned)
+    cleaned = re.sub(r"^(关于|有关|请|麻烦|帮我|帮忙)+", "", cleaned)
+    cleaned = re.sub(r"^(全国的|中国的|全国|中国)+", "", cleaned)
+    cleaned = re.sub(r"(相关|方面|领域|内容)+$", "", cleaned)
     if not cleaned:
         return DEFAULT_THEME_LABEL
     return cleaned
@@ -173,6 +196,25 @@ def build_rows(user_query: str, year: str, province: str, theme: str, expansions
     return rows
 
 
+def build_national_rows(user_query: str, year: str, theme: str):
+    rows = []
+    base_theme = theme.replace("政策", "")
+    for province in NATIONAL_PROVINCES:
+        for direction in NATIONAL_DIRECTIONS:
+            expanded = f"{base_theme}{direction}"
+            rows.append({
+                "年份": year,
+                "地区": province,
+                "原始需求": user_query,
+                "标准主题": theme,
+                "扩展方向": expanded,
+                "搜索词": f"{year}年{province}{expanded}",
+                "状态": "未执行",
+                "执行备注": ""
+            })
+    return rows
+
+
 def validate_rows(rows):
     if not rows:
         raise ValueError("扩展结果为空，无法生成表格")
@@ -208,21 +250,32 @@ def main():
     year = extract_year(user_query)
     province = extract_province(user_query)
     template_theme = detect_template_theme(user_query, templates)
+    national_mode = is_national_request(user_query)
 
     if is_all_policy_request(user_query):
         theme = "全部政策"
         expansions = build_generic_expansions(theme)
         mode = "all-policy"
+        rows = build_rows(user_query, year, province, theme, expansions)
+    elif national_mode:
+        if template_theme:
+            theme = template_theme
+        else:
+            theme = extract_generic_theme(user_query, "全国", year)
+        mode = "national"
+        rows = build_national_rows(user_query, year, theme)
+        province = "全国"
+        expansions = []
     elif template_theme:
         theme = template_theme
         expansions = templates[theme]["expansions"]
         mode = "template"
+        rows = build_rows(user_query, year, province, theme, expansions)
     else:
         theme = extract_generic_theme(user_query, province, year)
         expansions = build_generic_expansions(theme)
         mode = "generic"
-
-    rows = build_rows(user_query, year, province, theme, expansions)
+        rows = build_rows(user_query, year, province, theme, expansions)
     write_csv(rows)
 
     print(f"已生成扩展表：{OUTPUT_PATH}")
