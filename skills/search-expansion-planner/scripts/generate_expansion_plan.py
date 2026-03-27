@@ -12,6 +12,7 @@ OUTPUT_DIR = Path.home() / "Desktop" / "搜索配置文件夹"
 OUTPUT_PATH = OUTPUT_DIR / "current-expansion-plan.csv"
 DEFAULT_PROVINCE = "湖北省"
 DEFAULT_THEME_LABEL = "通用主题"
+REQUIRED_FIELDS = ["年份", "地区", "原始需求", "标准主题", "扩展方向", "搜索词", "状态", "执行备注"]
 
 PROVINCES = [
     "北京市", "天津市", "上海市", "重庆市",
@@ -135,17 +136,29 @@ def build_rows(user_query: str, year: str, province: str, theme: str, expansions
             "标准主题": theme,
             "扩展方向": item,
             "搜索词": f"{year}年{province}{item}",
-            "状态": "待执行",
+            "状态": "未执行",
             "执行备注": ""
         })
     return rows
 
 
+def validate_rows(rows):
+    if not rows:
+        raise ValueError("扩展结果为空，无法生成表格")
+    for idx, row in enumerate(rows, start=1):
+        missing = [field for field in REQUIRED_FIELDS if field not in row]
+        if missing:
+            raise ValueError(f"第 {idx} 行缺少字段：{', '.join(missing)}")
+        for field in REQUIRED_FIELDS:
+            if row.get(field) is None:
+                raise ValueError(f"第 {idx} 行字段为空：{field}")
+
+
 def write_csv(rows):
+    validate_rows(rows)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["年份", "地区", "原始需求", "标准主题", "扩展方向", "搜索词", "状态", "执行备注"]
     with open(OUTPUT_PATH, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=REQUIRED_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
 
