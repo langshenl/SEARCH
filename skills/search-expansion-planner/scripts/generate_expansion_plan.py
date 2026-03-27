@@ -38,9 +38,14 @@ GENERIC_POLICY_SUFFIXES = [
 ]
 
 STOPWORDS = [
-    "帮我搜索", "帮我查找", "帮我查", "搜索", "查找", "查一下", "查",
-    "湖北省内", "省内", "所有的", "所有", "相关内容", "相关政策", "政策", "内容",
+    "帮我搜索", "帮我查找", "帮我查", "搜索", "搜一下", "搜索一下", "查找", "查一下", "查",
+    "请帮我", "麻烦帮我", "帮忙", "一下", "一下子",
+    "湖北省内", "省内", "所有的", "相关内容", "相关政策", "内容",
     "关于", "有关", "方面", "方面的", "领域", "领域的", "相关", "内", "年", "的"
+]
+
+ALL_POLICY_PATTERNS = [
+    "所有政策", "全部政策", "政策内容", "全省政策", "所有政策内容", "全部政策内容"
 ]
 
 NORMALIZE_MAP = {
@@ -87,6 +92,11 @@ def extract_province(text: str) -> str:
     return DEFAULT_PROVINCE
 
 
+def is_all_policy_request(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    return any(pat in compact for pat in ALL_POLICY_PATTERNS)
+
+
 def detect_template_theme(text: str, templates: dict):
     lowered = text.strip()
     for theme, meta in templates.items():
@@ -121,6 +131,12 @@ def build_generic_expansions(theme: str):
         return [
             "专题政策", "扶持政策", "发展政策", "管理政策", "实施政策",
             "财政支持政策", "人才政策", "数字化政策"
+        ]
+    if theme == "全部政策":
+        return [
+            "经济政策", "科技政策", "工业政策", "招商投资政策", "人才就业政策",
+            "财税金融政策", "营商环境政策", "农业政策", "环保双碳政策", "教育政策",
+            "医疗卫生政策", "交通物流政策"
         ]
     expansions = []
     for suffix in GENERIC_POLICY_SUFFIXES:
@@ -193,7 +209,11 @@ def main():
     province = extract_province(user_query)
     template_theme = detect_template_theme(user_query, templates)
 
-    if template_theme:
+    if is_all_policy_request(user_query):
+        theme = "全部政策"
+        expansions = build_generic_expansions(theme)
+        mode = "all-policy"
+    elif template_theme:
         theme = template_theme
         expansions = templates[theme]["expansions"]
         mode = "template"
