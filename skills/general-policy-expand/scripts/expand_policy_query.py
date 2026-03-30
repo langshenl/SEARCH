@@ -59,17 +59,41 @@ PROVINCE_ALIASES = {
     '宁夏': '宁夏', '宁夏回族自治区': '宁夏', '新疆': '新疆', '新疆维吾尔自治区': '新疆',
 }
 
+POLICY_HINTS = ['政策', '实施意见', '管理办法', '若干措施', '发展规划', '通知', '公告', '工作方案', '建设方案', '申报指南']
 FILLERS = [
     '帮我搜索一下', '帮我搜一下', '搜索一下', '搜一下', '搜索', '搜',
-    '政策相关内容', '相关内容', '相关', '内容', '一下', '方面', '领域'
+    '政策相关内容', '相关政策', '相关内容', '相关', '内容', '一下', '方面', '领域', '资料', '文件'
 ]
 
 GENERIC_DIRECTIONS = ['发展规划', '实施意见', '若干措施', '管理办法', '工作通知', '建设方案', '申报指南', '专项政策']
+GENERIC_NATIONAL_DIRECTIONS = ['发展规划', '实施意见']
 TOPIC_TEMPLATES = {
     '博物馆': ['博物馆发展规划', '博物馆实施意见', '博物馆管理办法', '博物馆建设方案', '博物馆扶持政策', '文物保护实施意见', '公共文化服务若干措施', '博物馆工作通知'],
+    '文旅': ['文化旅游发展规划', '文化旅游实施意见', '文旅产业扶持政策', '文旅项目建设方案', '旅游管理办法', '公共文化服务若干措施', '文旅工作通知', '旅游专项政策'],
     '农业': ['农业发展规划', '农业实施意见', '农业管理办法', '农业扶持政策', '高标准农田建设方案', '粮食安全实施意见', '农业若干措施', '农业工作通知'],
-    '新能源': ['新能源发展规划', '新能源实施意见', '新能源管理办法', '新能源扶持政策', '光伏建设方案', '储能实施意见', '新能源若干措施', '新能源工作通知'],
     '教育': ['教育发展规划', '教育实施意见', '教育管理办法', '教育建设方案', '教育扶持政策', '教育若干措施', '教育工作通知', '教育专项政策'],
+    '科技': ['科技发展规划', '科技创新实施意见', '科技项目管理办法', '成果转化若干措施', '科技扶持政策', '科技平台建设方案', '科技工作通知', '科技专项政策'],
+    '人才': ['人才发展规划', '人才实施意见', '人才引进若干措施', '人才管理办法', '高层次人才支持政策', '人才平台建设方案', '人才工作通知', '人才专项政策'],
+    '新能源': ['新能源发展规划', '新能源实施意见', '新能源管理办法', '新能源扶持政策', '光伏建设方案', '储能实施意见', '新能源若干措施', '新能源工作通知'],
+    '产业': ['产业发展规划', '产业实施意见', '产业扶持政策', '产业管理办法', '产业建设方案', '产业若干措施', '产业工作通知', '产业专项政策'],
+    '交通': ['交通发展规划', '交通实施意见', '交通管理办法', '交通建设方案', '交通扶持政策', '交通若干措施', '交通工作通知', '交通专项政策'],
+    '医疗': ['医疗卫生发展规划', '医疗卫生实施意见', '医疗管理办法', '医疗建设方案', '医疗扶持政策', '公共卫生若干措施', '医疗工作通知', '医疗专项政策'],
+    '招商': ['招商引资发展规划', '招商引资实施意见', '招商引资若干措施', '招商管理办法', '项目招引建设方案', '招商扶持政策', '招商工作通知', '招商专项政策'],
+    '环保': ['生态环境发展规划', '生态环境实施意见', '环境管理办法', '环保建设方案', '绿色发展若干措施', '污染防治实施意见', '环保工作通知', '环保专项政策'],
+}
+TOPIC_ALIASES = {
+    '文博': '博物馆', '文物': '博物馆', '纪念馆': '博物馆',
+    '文旅': '文旅', '文化旅游': '文旅', '旅游': '文旅',
+    '农业': '农业', '三农': '农业', '乡村振兴': '农业',
+    '教育': '教育',
+    '科技': '科技', '创新': '科技',
+    '人才': '人才', '就业': '人才',
+    '新能源': '新能源', '光伏': '新能源', '风电': '新能源', '储能': '新能源',
+    '产业': '产业', '工业': '产业', '制造业': '产业',
+    '交通': '交通', '物流': '交通', '道路': '交通',
+    '医疗': '医疗', '卫生': '医疗', '健康': '医疗',
+    '招商': '招商', '投资': '招商',
+    '环保': '环保', '生态环境': '环保', '双碳': '环保',
 }
 
 
@@ -90,17 +114,26 @@ def clean_text(text: str) -> str:
     for x in FILLERS:
         s = s.replace(x, '')
     s = re.sub(r'\s+', '', s)
-    s = s.replace('的政策', '政策').replace('的', '')
+    s = s.replace('的政策', '政策').replace('政策的', '政策').replace('的', '')
     return s
 
 
 def detect_mode(text: str) -> str:
     t = text.replace(' ', '')
-    if '全国' in t:
+    if any(k in t for k in ['全国', '全国范围', '全国各地', '各省']):
         return '全国'
-    if any(k in t for k in ['政策', '实施意见', '管理办法', '若干措施', '发展规划', '通知', '公告', '工作方案', '建设方案']):
+    if any(k in t for k in POLICY_HINTS):
         return '政策'
     return '普通'
+
+
+def normalize_topic_name(topic: str | None) -> str | None:
+    if not topic:
+        return None
+    for k, v in TOPIC_ALIASES.items():
+        if k in topic:
+            return v
+    return topic
 
 
 def extract_topic(cleaned: str, province: str | None) -> str | None:
@@ -110,10 +143,11 @@ def extract_topic(cleaned: str, province: str | None) -> str | None:
         for v in sorted(variants, key=len, reverse=True):
             if v:
                 s = s.replace(v, '')
-    s = s.replace('全国', '')
-    s = s.replace('政策', '')
+    s = s.replace('全国范围', '').replace('全国各地', '').replace('全国', '').replace('各省', '')
+    for hint in POLICY_HINTS:
+        s = s.replace(hint, '')
     s = s.strip()
-    return s or None
+    return normalize_topic_name(s or None)
 
 
 def host_of(url: str) -> str:
@@ -138,6 +172,20 @@ def make_rows(year: str, province: str, raw_topic: str | None, directions: list[
     return rows
 
 
+def expand_topic(topic: str | None, national: bool = False) -> list[str]:
+    if not topic:
+        return GENERIC_NATIONAL_DIRECTIONS[:] if national else GENERIC_DIRECTIONS[:]
+    if topic in TOPIC_TEMPLATES:
+        base = TOPIC_TEMPLATES[topic]
+        return base[:2] if national else base[:8]
+    if national:
+        return [f'{topic}发展规划', f'{topic}实施意见']
+    return [
+        f'{topic}发展规划', f'{topic}实施意见', f'{topic}若干措施', f'{topic}管理办法',
+        f'{topic}建设方案', f'{topic}扶持政策', f'{topic}工作通知', f'{topic}专项政策'
+    ][:8]
+
+
 def expand(text: str):
     year = extract_year(text)
     province = extract_province(text)
@@ -148,26 +196,16 @@ def expand(text: str):
     if mode == '普通':
         return {'mode': '普通', 'rows': [{'年份': year, '地区': province or '', '域名锚点': '', '原始主题': topic or '', '扩展方向': '', '搜索关键词': text, '模式': '普通'}]}
 
-    if '全国' in text:
-        if topic and topic in TOPIC_TEMPLATES:
-            base = [TOPIC_TEMPLATES[topic][0], TOPIC_TEMPLATES[topic][1]]
-        elif topic:
-            base = [f'{topic}发展规划', f'{topic}实施意见']
-        else:
-            base = ['发展规划', '实施意见']
+    if mode == '全国':
         rows = []
+        base = expand_topic(topic, national=True)
         for p in PROVINCE_DOMAINS:
             rows.extend(make_rows(year, p, topic, base[:2], '全国'))
         return {'mode': '全国', 'rows': rows}
 
     if province:
-        if topic and topic in TOPIC_TEMPLATES:
-            directions = TOPIC_TEMPLATES[topic][:8]
-        elif topic:
-            directions = [f'{topic}发展规划', f'{topic}实施意见', f'{topic}若干措施', f'{topic}管理办法', f'{topic}建设方案', f'{topic}扶持政策', f'{topic}工作通知', f'{topic}专项政策'][:8]
-        else:
-            directions = GENERIC_DIRECTIONS[:8]
-        rows = make_rows(year, province, topic, directions, '单省')
+        directions = expand_topic(topic, national=False)
+        rows = make_rows(year, province, topic, directions[:8], '单省')
         return {'mode': '单省', 'rows': rows}
 
     return {'mode': '普通', 'rows': [{'年份': year, '地区': '', '域名锚点': '', '原始主题': topic or '', '扩展方向': '', '搜索关键词': text, '模式': '普通'}]}
