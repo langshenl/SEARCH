@@ -4,6 +4,7 @@ import csv
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 from zipfile import ZipFile
 from xml.etree import ElementTree as ET
 
@@ -11,11 +12,17 @@ REQ_FIELDS = ["title", "summary", "url"]
 
 FIELD_ALIASES = {
     "title": ["标题", "title", "Title"],
-    "summary": ["摘要", "summary", "Summary", "正文", "content", "正文摘要"],
+    "summary": ["摘要", "summary", "Summary", "正文", "content", "正文摘要", "snippet"],
     "url": ["原文地址", "原文链接", "url", "URL", "source_url", "link"],
     "source_name": ["来源地方", "来源网站", "source", "source_name"],
     "published_at": ["发布时间", "published_at", "date"],
 }
+
+OFFICIAL_HOST_HINTS = [
+    "gov.cn",
+    "beijing.gov.cn", "hubei.gov.cn", "hebei.gov.cn", "hunan.gov.cn", "gd.gov.cn",
+    "jiangsu.gov.cn", "zj.gov.cn", "henan.gov.cn", "shanghai.gov.cn", "cq.gov.cn",
+]
 
 
 def clean_text(s: str) -> str:
@@ -119,13 +126,13 @@ def iter_records(path: Path):
         yield from iter_xlsx(path)
 
 
-def write_xlsx(rows, output_path: Path):
+def write_xlsx(rows, output_path: Path, title: str = "政策库"):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     from openpyxl import Workbook
     wb = Workbook()
     ws = wb.active
-    ws.title = "政策库"
-    headers = ["标题", "摘要", "原文链接", "来源地方", "发布时间"]
+    ws.title = title
+    headers = ["标题", "摘要", "原文链接", "来源地方", "发布时间", "分类"]
     ws.append(headers)
     for r in rows:
         ws.append([
@@ -134,14 +141,33 @@ def write_xlsx(rows, output_path: Path):
             r.get("url", ""),
             r.get("source_name", ""),
             r.get("published_at", ""),
+            r.get("category", ""),
         ])
     wb.save(output_path)
+
+
+def classify_source(url: str, title: str) -> str:
+    host = (urlsplit(url).netloc or "").lower()
+    title = clean_text(title)
+    is_official = any(host == hint or host.endswith('.' + hint) or hint in host for hint in OFFICIAL_HOST_HINTS)
+    if is_official:
+        if '解读' in title:
+            return '官方解读'
+        if any(x in title for x in ['通知', '办法', '意见', '措施', '规划', '方案', '政策文件', '政府文件']):
+            return '官方原文/政策页'
+        return '官方站点其他'
+    if 'baike.baidu.com' in host:
+        return '百科参考'
+    if any(x in host for x in ['news', 'thepaper', '163.com', 'bjnews.com.cn', 'chinanews.com.cn', 'cctv.com']):
+        return '新闻转载'
+    return '混合参考'
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, nargs="+", help="Input files or directories")
-    ap.add_argument("--output", required=True, help="Output xlsx path")
+    ap.add_argument("--output", required=True, help="Mixed output xlsx path")
+    ap.add_argument("--official-output", required=False, help="Official-priority xlsx path")
     ap.add_argument("--log", required=False, help="Optional log json path")
     args = ap.parse_args()
 
@@ -183,19 +209,29 @@ def main():
                 "url": url,
                 "source_name": source_name,
                 "published_at": published_at,
+                "category": classify_source(url, title),
             })
 
-    write_xlsx(curated, Path(args.output).expanduser())
+    mixed_output = Path(args.output).expanduser()
+    official_output = Path(args.official_output).expanduser() if args.official_output else mixed_output.with_name(mixed_output.stem + "_官方优先版.xlsx")
+
+    mixed_rows = curated
+    official_rows = [r for r in curated if r.get('category') in {'官方原文/政策页', '官方解读', '官方站点其他'}]
+
+    write_xlsx(mixed_rows, mixed_output, title="混合版")
+    write_xlsx(official_rows, official_output, title="官方优先版")
 
     if args.log:
         log = {
             "total_input_records": total_in,
             "dropped_missing_required_fields": dropped_missing,
             "dropped_duplicate_by_original_url": deduped,
-            "output_records": len(curated),
+            "mixed_output_records": len(mixed_rows),
+            "official_output_records": len(official_rows),
             "required_fields": REQ_FIELDS,
             "dedup_key": "原文地址",
-            "output": str(Path(args.output).expanduser()),
+            "mixed_output": str(mixed_output),
+            "official_output": str(official_output),
             "inputs": [str(p) for p in paths],
         }
         Path(args.log).expanduser().write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
