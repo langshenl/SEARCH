@@ -24,6 +24,12 @@
       "zip_url": "https://lightmake.site/api/v1/download?slug=exa-web-search-free",
       "source": "skillhub",
       "version": "1.0.1"
+    },
+    "web-search-exa": {
+      "name": "Web Search by Exa",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=web-search-exa",
+      "source": "skillhub",
+      "version": "2.0.0"
     }
   }
 }
