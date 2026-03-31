@@ -80,8 +80,16 @@ def extract_attachments(html: str) -> str:
 
 
 def derive_policy_id(url: str) -> str:
-    m = re.search(r'(t\d+_\d+)', url)
-    return m.group(1) if m else ''
+    patterns = [
+        r'(t\d+_\d+)',
+        r'/([a-f0-9]{24,})\.shtml(?:\?|$)',
+        r'/([A-Za-z0-9_-]{16,})\.shtml(?:\?|$)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, url, flags=re.I)
+        if m:
+            return m.group(1)
+    return ''
 
 
 def derive_region(url: str, html: str) -> str:
