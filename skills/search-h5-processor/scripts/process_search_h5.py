@@ -81,10 +81,9 @@ def write_excel(rows, path: Path, source_file: str):
     wb = Workbook()
     ws = wb.active
     ws.title = '搜索结果'
-    ws.append(['序号', '标题', '简介', '原始百度链接', '最终落地链接', '来源页面文件', '提取时间'])
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    for i, row in enumerate(rows, 1):
-        ws.append([i, row['title'], row['summary'], row['raw_url'], row['final_url'], source_file, now])
+    ws.append(['标题', '简介', '原始百度链接', '原文链接'])
+    for row in rows:
+        ws.append([row['title'], row['summary'], row['raw_url'], row['final_url']])
     wb.save(path)
 
 
