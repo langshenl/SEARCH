@@ -201,6 +201,27 @@ def write_excel(rows, out_path: Path):
     ws.append(FIELDS)
     for row in rows:
         ws.append([row.get(f, '') for f in FIELDS])
+
+    header_index = {cell.value: i + 1 for i, cell in enumerate(ws[1])}
+    for field in ['原始链接', '附件链接']:
+        if field not in header_index:
+            continue
+        col = header_index[field]
+        for r in range(2, ws.max_row + 1):
+            cell = ws.cell(row=r, column=col)
+            value = str(cell.value or '').strip()
+            if not value:
+                continue
+            if field == '附件链接' and '\n' in value:
+                first = value.splitlines()[0].strip()
+                if first.startswith('http'):
+                    cell.value = first
+                    cell.hyperlink = first
+                    cell.style = 'Hyperlink'
+                continue
+            if value.startswith('http'):
+                cell.hyperlink = value
+                cell.style = 'Hyperlink'
     wb.save(out_path)
 
 
