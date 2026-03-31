@@ -2,11 +2,11 @@
 
 ## What this skill does
 
-This skill packages the current stable multi-page simulated click search workflow for policy and official-document searches.
+This skill packages the current verified multi-page simulated click search workflow for policy and official-document searches.
 
 It performs:
-- query expansion
-- default selection of expansion option #1
+- single-result policy query expansion
+- direct use of the unique final query
 - Safari + Baidu simulated search
 - current-year time filter
 - multi-page capture of search result H5 files
@@ -40,7 +40,24 @@ These folders can be auto-created by scripts when needed.
 
 ## Bundled scripts and what each one does
 
-### 1. `scripts/capture_multi_page_baidu.command`
+### 1. `scripts/build_single_policy_query.py`
+
+Purpose:
+- Clean natural-language search input
+- Extract an explicit year if present, otherwise default to current year
+- Detect province or nationwide scope
+- Match province to government domain
+- Return one unique final search query
+
+Rules:
+- single province → `年份 + 搜索关键词 + site:省级域名`
+- nationwide → `年份 + 搜索关键词 + site:gov.cn`
+- return only one final result
+- do not output multiple candidates
+- do not write CSV
+- do not write `搜索配置文件夹`
+
+### 2. `scripts/capture_multi_page_baidu.command`
 
 Purpose:
 - Open Safari
@@ -64,7 +81,7 @@ Important rules:
 - if available pages are fewer than requested, capture only existing pages
 - stop normally when no next page exists
 
-### 2. `scripts/process_search_h5_multi.py`
+### 3. `scripts/process_search_h5_multi.py`
 
 Purpose:
 - Read a batch of multi-page H5 files from the same capture run
@@ -86,7 +103,7 @@ Output columns in `搜索结果.xlsx`:
 - 原始百度链接
 - 原文链接
 
-### 3. `scripts/fetch_detail_links.py`
+### 4. `scripts/fetch_detail_links.py`
 
 Purpose:
 - Read `原文链接.md`
@@ -100,32 +117,32 @@ Input:
 - `~/Desktop/处理文件夹/原文链接.md`
 
 Output:
-- `~/Desktop/detail-h5/YYYYMMDD_HHMMSS_关键词_政策详情抓取结果.xlsx`
+- `~/Desktop/detail-h5/` detail Excel
 
 Important rules:
 - serial fetching
 - 1-second spacing between links
 - keep all required columns even if values are missing
 - mark rows needing browser fallback
+- support multiple government URL formats for 政策ID extraction
 
 ## Full workflow order
 
-### Step 1. Expand the query
+### Step 1. Build one final search query
 
-Use the policy expansion step to generate candidate queries.
+Run:
+```bash
+python3 scripts/build_single_policy_query.py "搜索湖北省政策"
+```
 
-Rule:
-- default to expansion option #1
-- only override if the user explicitly requests another option
+Result example:
+- `2026年 湖北省政策 site:www.hubei.gov.cn`
 
 ### Step 2. Run multi-page Baidu capture
 
 Run:
-- `scripts/capture_multi_page_baidu.command`
-
-Example:
 ```bash
-scripts/capture_multi_page_baidu.command "2026年 湖北省 新能源发展规划 site:www.hubei.gov.cn" 3
+scripts/capture_multi_page_baidu.command "2026年 湖北省政策 site:www.hubei.gov.cn" 3
 ```
 
 Result:
@@ -135,7 +152,7 @@ Result:
 
 Run:
 ```bash
-python3 scripts/process_search_h5_multi.py "20260331_144520_2026年 湖北省 新能源发展规划 site_www.hubei.gov.cn"
+python3 scripts/process_search_h5_multi.py "20260331_152309_2026年 湖北省政策 site_www.hubei.gov.cn"
 ```
 
 Result:
@@ -155,7 +172,7 @@ Result:
 ## Current workflow rules
 
 - The whole workflow defaults to multi-page search
-- Expansion option #1 is the default
+- Query expansion returns only one final result
 - Search page count is capped by a target maximum, but actual page count depends on what Baidu offers
 - If page count is insufficient, capture whatever pages exist
 - If merged result count is `0`, return exactly:
@@ -221,8 +238,9 @@ When moving this skill to another OpenClaw machine:
 7. Run one test query end-to-end
 
 Recommended validation query examples:
-- `搜索四川的相关政策`
+- `搜索湖北省政策`
 - `搜索湖北省新能源相关政策`
+- `搜索四川的相关政策`
 
 ## Packaging artifact
 
