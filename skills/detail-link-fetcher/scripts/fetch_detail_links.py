@@ -18,7 +18,7 @@ TIMEOUT = 20
 
 FIELDS = [
     '政策ID', '标题', '正文', '摘要', '发文机关', '联合发文机关', '发布时间', '文号',
-    '政策层级', '地区', '所属行业', '政策类型', '政策用途', '政策主题', '关键词', '适用对象', '支持方式',
+    '政策层级', '地区', '所属行业', '类型', '政策主题', '关键词', '适用对象', '支持方式',
     '申报条件', '申报时间', '有效期', '政策状态', '原始链接', '附件链接', '相似政策', '上位政策/下位政策关系',
     '抓取状态', '正文长度', '是否检测到附件', '是否需要浏览器兜底'
 ]
@@ -112,34 +112,13 @@ def derive_region(url: str, html: str) -> str:
     return ''
 
 
-def classify_policy_type(title: str, summary: str, body: str) -> str:
-    text = f'{title} {summary} {body}'
-    rules = [
-        ('规划类', ['发展规划', '规划纲要', '规划']),
-        ('意见类', ['实施意见', '意见']),
-        ('办法类', ['管理办法', '办法', '细则']),
-        ('通知类', ['通知', '通告']),
-        ('方案类', ['工作方案', '建设方案', '方案']),
-        ('指南类', ['申报指南', '办事指南', '指南']),
-        ('措施类', ['若干措施', '支持措施', '措施']),
-        ('公告类', ['公告']),
-        ('通报类', ['通报']),
-        ('解读类', ['解读', '答记者问']),
-        ('报告类', ['报告', '工作报告', '执行情况']),
-    ]
-    for label, keywords in rules:
-        if any(k in text for k in keywords):
-            return label
-    return '其他类'
-
-
-def classify_policy_purpose(title: str, summary: str, body: str, policy_type: str) -> str:
+def classify_type(title: str, summary: str, body: str) -> str:
     text = f'{title} {summary} {body}'
     rules = [
         ('项目申报', ['申报', '申报指南', '申报条件']),
         ('发展规划', ['发展规划', '规划纲要', '规划']),
         ('工作部署', ['工作要点', '工作方案', '通知', '召开', '部署']),
-        ('产业扶持', ['扶持', '支持', '奖补', '补贴', '若干措施']),
+        ('产业扶持', ['扶持', '支持', '奖补', '补贴', '若干措施', '支持措施']),
         ('管理规范', ['管理办法', '办法', '细则', '监管']),
         ('建设实施', ['建设方案', '建设', '实施']),
         ('政策解读', ['解读', '答记者问']),
@@ -150,21 +129,7 @@ def classify_policy_purpose(title: str, summary: str, body: str, policy_type: st
     for label, keywords in rules:
         if any(k in text for k in keywords):
             return label
-    mapping = {
-        '规划类': '发展规划',
-        '意见类': '工作部署',
-        '办法类': '管理规范',
-        '通知类': '工作部署',
-        '方案类': '建设实施',
-        '指南类': '项目申报',
-        '措施类': '产业扶持',
-        '公告类': '信息公告',
-        '通报类': '情况通报',
-        '解读类': '政策解读',
-        '报告类': '统计报告',
-        '其他类': '综合管理',
-    }
-    return mapping.get(policy_type, '综合管理')
+    return '综合管理'
 
 
 def status_and_fallback(row: dict) -> tuple[str, str, str]:
@@ -207,8 +172,7 @@ def parse_detail(url: str) -> dict:
     row['正文'] = extract_body(html)
     row['附件链接'] = extract_attachments(html)
     row['地区'] = derive_region(url, html)
-    row['政策类型'] = classify_policy_type(row['标题'], row['摘要'], row['正文'])
-    row['政策用途'] = classify_policy_purpose(row['标题'], row['摘要'], row['正文'], row['政策类型'])
+    row['类型'] = classify_type(row['标题'], row['摘要'], row['正文'])
     row['是否检测到附件'] = '是' if row['附件链接'] else '否'
 
     status, body_len, need_browser = status_and_fallback(row)
