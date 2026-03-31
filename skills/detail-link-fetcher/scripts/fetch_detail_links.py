@@ -18,7 +18,7 @@ TIMEOUT = 20
 
 FIELDS = [
     '政策ID', '标题', '正文', '摘要', '发文机关', '联合发文机关', '发布时间', '文号',
-    '政策层级', '地区', '所属行业', '政策类型', '政策主题', '关键词', '适用对象', '支持方式',
+    '政策层级', '地区', '所属行业', '政策类型', '政策用途', '政策主题', '关键词', '适用对象', '支持方式',
     '申报条件', '申报时间', '有效期', '政策状态', '原始链接', '附件链接', '相似政策', '上位政策/下位政策关系',
     '抓取状态', '正文长度', '是否检测到附件', '是否需要浏览器兜底'
 ]
@@ -93,12 +93,78 @@ def derive_policy_id(url: str) -> str:
 
 
 def derive_region(url: str, html: str) -> str:
-    if 'hubei.gov.cn' in url:
-        return '湖北省'
+    region_map = {
+        'hubei.gov.cn': '湖北省',
+        'hunan.gov.cn': '湖南省',
+        'hebei.gov.cn': '河北省',
+        'yn.gov.cn': '云南省',
+        'sc.gov.cn': '四川省',
+        'yn.gov.cn': '云南省',
+        'hunan.gov.cn': '湖南省',
+    }
+    for host, region in region_map.items():
+        if host in url:
+            return region
     site_name = extract_meta(html, 'SiteName')
-    if '湖北' in site_name:
-        return '湖北省'
+    for region in ['湖北省', '湖南省', '河北省', '云南省', '四川省']:
+        if region.replace('省', '') in site_name or region in site_name:
+            return region
     return ''
+
+
+def classify_policy_type(title: str, summary: str, body: str) -> str:
+    text = f'{title} {summary} {body}'
+    rules = [
+        ('规划类', ['发展规划', '规划纲要', '规划']),
+        ('意见类', ['实施意见', '意见']),
+        ('办法类', ['管理办法', '办法', '细则']),
+        ('通知类', ['通知', '通告']),
+        ('方案类', ['工作方案', '建设方案', '方案']),
+        ('指南类', ['申报指南', '办事指南', '指南']),
+        ('措施类', ['若干措施', '支持措施', '措施']),
+        ('公告类', ['公告']),
+        ('通报类', ['通报']),
+        ('解读类', ['解读', '答记者问']),
+        ('报告类', ['报告', '工作报告', '执行情况']),
+    ]
+    for label, keywords in rules:
+        if any(k in text for k in keywords):
+            return label
+    return '其他类'
+
+
+def classify_policy_purpose(title: str, summary: str, body: str, policy_type: str) -> str:
+    text = f'{title} {summary} {body}'
+    rules = [
+        ('项目申报', ['申报', '申报指南', '申报条件']),
+        ('发展规划', ['发展规划', '规划纲要', '规划']),
+        ('工作部署', ['工作要点', '工作方案', '通知', '召开', '部署']),
+        ('产业扶持', ['扶持', '支持', '奖补', '补贴', '若干措施']),
+        ('管理规范', ['管理办法', '办法', '细则', '监管']),
+        ('建设实施', ['建设方案', '建设', '实施']),
+        ('政策解读', ['解读', '答记者问']),
+        ('统计报告', ['统计公报', '工作报告', '报告', '执行情况']),
+        ('资金预算', ['预算', '资金', '财政']),
+        ('人才引进', ['人才', '引进']),
+    ]
+    for label, keywords in rules:
+        if any(k in text for k in keywords):
+            return label
+    mapping = {
+        '规划类': '发展规划',
+        '意见类': '工作部署',
+        '办法类': '管理规范',
+        '通知类': '工作部署',
+        '方案类': '建设实施',
+        '指南类': '项目申报',
+        '措施类': '产业扶持',
+        '公告类': '信息公告',
+        '通报类': '情况通报',
+        '解读类': '政策解读',
+        '报告类': '统计报告',
+        '其他类': '综合管理',
+    }
+    return mapping.get(policy_type, '综合管理')
 
 
 def status_and_fallback(row: dict) -> tuple[str, str, str]:
@@ -141,6 +207,8 @@ def parse_detail(url: str) -> dict:
     row['正文'] = extract_body(html)
     row['附件链接'] = extract_attachments(html)
     row['地区'] = derive_region(url, html)
+    row['政策类型'] = classify_policy_type(row['标题'], row['摘要'], row['正文'])
+    row['政策用途'] = classify_policy_purpose(row['标题'], row['摘要'], row['正文'], row['政策类型'])
     row['是否检测到附件'] = '是' if row['附件链接'] else '否'
 
     status, body_len, need_browser = status_and_fallback(row)
@@ -174,21 +242,21 @@ def write_excel(rows, out_path: Path):
 
 def derive_name_from_links(link_md: Path) -> str:
     text = link_md.read_text(encoding='utf-8', errors='ignore')
-    first_line = ''
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith(tuple(str(i)+'.' for i in range(1, 10))) or line.startswith('- ['):
-            first_line = line
-            break
-    title = first_line
-    title = re.sub(r'^\d+\.\s*', '', title)
-    title = re.sub(r'^-\s*', '', title)
-    title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)
-    title = re.sub(r'\s*site:[^\s]+', '', title)
-    title = title.replace(' - ', ' ')
-    title = re.sub(r'[\\/:*?"<>|]+', '_', title)
-    title = re.sub(r'\s+', '', title).strip()
-    return title[:50] or '详情抓取'
+    urls = re.findall(r'\((http[^)]+)\)', text)
+    if not urls:
+        return '搜索结果'
+    host_map = {
+        'www.hubei.gov.cn': '湖北省政策',
+        'www.hunan.gov.cn': '湖南政策',
+        'www.hebei.gov.cn': '河北政策',
+        'www.yn.gov.cn': '云南省政策',
+        'www.sc.gov.cn': '四川政策',
+    }
+    for url in urls:
+        for host, name in host_map.items():
+            if host in url:
+                return name
+    return '搜索结果'
 
 
 def main():
@@ -197,7 +265,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     keyword_name = derive_name_from_links(link_md)
-    out_excel = out_dir / f'{stamp}_{keyword_name}_政策详情抓取结果.xlsx'
+    out_excel = out_dir / f'{keyword_name}_{stamp}.xlsx'
 
     text = link_md.read_text(encoding='utf-8', errors='ignore')
     raw_urls = re.findall(r'\((http[^)]+)\)', text)
