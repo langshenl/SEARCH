@@ -6,6 +6,7 @@ import time
 import urllib.request
 from html import unescape
 from pathlib import Path
+from datetime import datetime
 
 from openpyxl import Workbook
 
@@ -163,12 +164,35 @@ def write_excel(rows, out_path: Path):
     wb.save(out_path)
 
 
+def derive_name_from_links(link_md: Path) -> str:
+    text = link_md.read_text(encoding='utf-8', errors='ignore')
+    first_line = ''
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith(tuple(str(i)+'.' for i in range(1, 10))) or line.startswith('- ['):
+            first_line = line
+            break
+    title = first_line
+    title = re.sub(r'^\d+\.\s*', '', title)
+    title = re.sub(r'^-\s*', '', title)
+    title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)
+    title = re.sub(r'\s*site:[^\s]+', '', title)
+    title = title.replace(' - ', ' ')
+    title = re.sub(r'[\\/:*?"<>|]+', '_', title)
+    title = re.sub(r'\s+', '', title).strip()
+    return title[:50] or '详情抓取'
+
+
 def main():
     link_md = Path.home() / 'Desktop' / '处理文件夹' / '原文链接.md'
     out_dir = Path.home() / 'Desktop' / 'detail-h5'
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_excel = out_dir / '政策详情抓取结果.xlsx'
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    keyword_name = derive_name_from_links(link_md)
+    out_excel = out_dir / f'{stamp}_{keyword_name}_政策详情抓取结果.xlsx'
 
+    text = link_md.read_text(encoding='utf-8', errors='ignore')
+    raw_urls = re.findall(r'\((http[^)]+)\)', text)
     urls = read_links(link_md)
     rows = []
     for url in urls:
@@ -180,6 +204,8 @@ def main():
     write_excel(rows, out_excel)
 
     print(f'INPUT_MD={link_md}')
+    print(f'RAW_LINK_COUNT={len(raw_urls)}')
+    print(f'UNIQUE_LINK_COUNT={len(urls)}')
     print(f'COUNT={len(rows)}')
     print(f'EXCEL={out_excel}')
 
