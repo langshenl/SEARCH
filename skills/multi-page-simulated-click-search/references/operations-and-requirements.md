@@ -13,6 +13,8 @@ It performs:
 - merged parsing of multi-page search results
 - deduplicated direct fetching of original policy links
 - structured policy-detail Excel output
+- hyperlink output for source URLs in Excel
+- one retained classification field: `类型`
 - browser-fallback candidate marking
 
 ## Environment requirements
@@ -112,18 +114,20 @@ Purpose:
 - Fetch detail pages one by one
 - Extract structured fields
 - Output policy-detail Excel
+- Write source links as clickable hyperlinks in Excel
 
 Input:
 - `~/Desktop/处理文件夹/原文链接.md`
 
 Output:
-- `~/Desktop/detail-h5/` detail Excel
+- `~/Desktop/detail-h5/搜索词_YYYYMMDD_HHMMSS.xlsx`
 
 Important rules:
 - serial fetching
 - 1-second spacing between links
 - keep all required columns even if values are missing
-- mark rows needing browser fallback
+- keep only one classification field: `类型`
+- `类型` represents what the policy is for (e.g. 发展规划 / 工作部署 / 项目申报 / 产业扶持 / 管理规范 / 建设实施 / 政策解读 / 统计报告 / 资金预算 / 人才引进 / 综合管理)
 - support multiple government URL formats for 政策ID extraction
 
 ## Full workflow order
@@ -180,6 +184,8 @@ Result:
 - Detail fetching uses deduplicated original links
 - Raw link count and unique link count should both be surfaced
 - Policy ID extraction should support multiple government URL styles
+- Final Excel should use clickable hyperlinks for source URLs
+- The retained classification field is `类型`, not `政策类型` or `政策用途`
 
 ## Required detail output fields
 
@@ -195,7 +201,7 @@ The detail Excel must always keep these columns:
 - 政策层级
 - 地区
 - 所属行业
-- 政策类型
+- 类型
 - 政策主题
 - 关键词
 - 适用对象
@@ -241,6 +247,8 @@ Recommended validation query examples:
 - `搜索湖北省政策`
 - `搜索湖北省新能源相关政策`
 - `搜索四川的相关政策`
+- `搜索云南省政策`
+- `搜索河北政策`
 
 ## Packaging artifact
 
