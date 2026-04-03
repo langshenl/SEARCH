@@ -30,6 +30,24 @@
       "zip_url": "https://lightmake.site/api/v1/download?slug=web-search-exa",
       "source": "skillhub",
       "version": "2.0.0"
+    },
+    "scrapling-official": {
+      "name": "Scrapling Official Skill",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=scrapling-official",
+      "source": "skillhub",
+      "version": "0.4.2"
+    },
+    "agent-browser": {
+      "name": "Agent Browser",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=agent-browser",
+      "source": "skillhub",
+      "version": "0.2.0"
+    },
+    "searxng": {
+      "name": "Searxng",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=searxng",
+      "source": "skillhub",
+      "version": "1.0.3"
     }
   }
 }
