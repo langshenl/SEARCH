@@ -48,8 +48,12 @@ python3 scripts/process_search_h5_multi.py "<h5目录路径>"
 ### 第 4 步：批量抓详情
 
 ```bash
-python3 scripts/fetch_detail_links.py "<关键词>"
+python3 scripts/fetch_detail_links_general.py "<关键词>"
 ```
+
+## 输出字段（12列）
+
+标题、正文、摘要、发文机关、发布时间、原始链接、关键词、类型、地区、抓取状态、正文长度、是否需要浏览器兜底
 
 ## 环境依赖
 
