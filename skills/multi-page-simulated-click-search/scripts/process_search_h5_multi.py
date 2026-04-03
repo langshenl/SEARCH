@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-
-import re
-import sys
-import urllib.request
+import re, sys, subprocess, concurrent.futures
 from html import unescape
 from pathlib import Path
 
@@ -16,7 +13,6 @@ USER_AGENT = (
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
     'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36'
 )
-TIMEOUT = 15
 
 
 def strip_html(text: str) -> str:
@@ -28,18 +24,28 @@ def strip_html(text: str) -> str:
     return text.strip()
 
 
-def resolve_final_url(url: str) -> str:
+def resolve_curl(url: str) -> str:
+    """用 curl 并行解析百度重定向，5秒超时"""
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            return resp.geturl()
+        proc = subprocess.run(
+            ['curl', '-sI', '-L', '-o', '/dev/null',
+             '-w', '%{url_effective}',
+             '--max-time', '5',
+             '--user-agent', USER_AGENT,
+             url],
+            capture_output=True, text=True, timeout=8
+        )
+        return proc.stdout.strip()
     except Exception:
         return url
 
 
 def extract_baidu_results(html: str):
     results = []
-    link_pat = re.compile(r'<a[^>]+href="(https?://www\.baidu\.com/link\?url=[^"]+)"[^>]*>([\s\S]*?)</a>', re.I)
+    link_pat = re.compile(
+        r'<a[^>]+href="(https?://www\.baidu\.com/link\?url=[^"]+)"[^>]*>([\s\S]*?)</a>',
+        re.I
+    )
     snippet_window = 1500
     for m in link_pat.finditer(html):
         raw_url = unescape(m.group(1)).strip()
@@ -49,12 +55,11 @@ def extract_baidu_results(html: str):
         start = m.end()
         snippet_raw = html[start:start + snippet_window]
         summary = strip_html(snippet_raw)[:300]
-        final_url = resolve_final_url(raw_url)
         results.append({
             'title': title,
             'summary': summary,
             'raw_url': raw_url,
-            'final_url': final_url,
+            'final_url': raw_url,
         })
     return results
 
@@ -72,12 +77,11 @@ def write_excel(rows, path: Path):
 
 
 def write_md(rows, path: Path):
-    lines = ['# 原文链接列表', '']
+    lines = ['# 原文链接', '']
     for i, row in enumerate(rows, 1):
-        title = row['title'] or f'结果{i}'
-        url = row['final_url'] or row['raw_url']
+        title = row['title']
+        url = row['final_url']
         lines.append(f'{i}. [{title}]({url})')
-    lines.append('')
     path.write_text('\n'.join(lines), encoding='utf-8')
 
 
@@ -110,14 +114,26 @@ def main():
             continue
         merged.extend(extract_baidu_results(html))
 
+    # 去重（按标题）
     dedup = []
-    seen = set()
+    seen_titles = set()
     for r in merged:
-        key = (r['title'], r['final_url'] or r['raw_url'])
-        if key in seen:
+        if r['title'] in seen_titles:
             continue
-        seen.add(key)
+        seen_titles.add(r['title'])
         dedup.append(r)
+
+    # 并行解析真实 URL（curl 10线程，5秒超时）
+    print(f'正在解析 {len(dedup)} 个链接的真实地址...')
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(resolve_curl, r['raw_url']): r for r in dedup}
+        done = 0
+        for fut in concurrent.futures.as_completed(futs, timeout=120):
+            r = futs[fut]
+            r['final_url'] = fut.result()
+            done += 1
+            if done % 10 == 0 or done == len(dedup):
+                print(f'  解析进度: {done}/{len(dedup)}')
 
     excel_path = out_dir / '搜索结果.xlsx'
     md_path = out_dir / '原文链接.md'
@@ -140,4 +156,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

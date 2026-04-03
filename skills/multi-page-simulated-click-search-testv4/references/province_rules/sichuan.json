@@ -1,0 +1,17 @@
+{
+  "name": "四川省政府",
+  "domain": "sc.gov.cn",
+  "templates": {
+    "ywwd": {
+      "content_start": "<div class=\"title\">",
+      "content_end": "<!-- <div class=\"fl\">",
+      "notes": "在线访谈内容页：div.ywyd 模板，标题末尾即正文开始"
+    },
+    "cms": {
+      "content_start": "<UCAPCONTENT>",
+      "content_end": "</UCAPCONTENT>",
+      "notes": "CMS文章页：UCAPCONTENT 自定义标签包裹正文"
+    }
+  },
+  "notes": "四川有两个模板：1) ywyd 在线访谈（content_end=flanking注释）2) CMS文章（UCAPCONTENT标签）。extract_body_by_rule 优先检测 UCAPCONTENT 是否存在来选择模板。"
+}

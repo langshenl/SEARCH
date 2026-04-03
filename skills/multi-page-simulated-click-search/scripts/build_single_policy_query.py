@@ -62,9 +62,16 @@ FILLERS = [
 ]
 
 
-def extract_year(text: str) -> str:
+def extract_year(text: str) -> tuple[str, str]:
+    """返回 (起始年, 终止年)，支持年份区间如'2023到2026年'"""
+    # 支持的区间格式：2023到2026年、2023年至2026年、2023-2026年、2023~2026年
+    range_m = re.search(r'(20\d{2})\s*(?:到|至|-|~)\s*(20\d{2})\s*年?', text)
+    if range_m:
+        start, end = sorted([range_m.group(1), range_m.group(2)])
+        return start, end
     m = re.search(r'(20\d{2})年?', text)
-    return m.group(1) if m else str(dt.datetime.now().year)
+    year = m.group(1) if m else str(dt.datetime.now().year)
+    return year, year
 
 
 def extract_region(text: str):
@@ -91,7 +98,10 @@ def clean_query_text(text: str) -> str:
 
 
 def remove_year_tokens(text: str) -> str:
-    s = re.sub(r'20\d{2}年?', '', text)
+    # 先去掉年份区间格式（2023到2026年、2023至2026年、2023-2026年）
+    s = re.sub(r'20\d{2}\s*(?:到|至|-|~)\s*20\d{2}年?', '', text)
+    # 再去掉单个年份
+    s = re.sub(r'20\d{2}年?', '', s)
     return re.sub(r'\s+', '', s).strip()
 
 
@@ -99,48 +109,95 @@ def host_of(url: str) -> str:
     return urllib.parse.urlsplit(url).netloc
 
 
-def build(text: str):
-    year = extract_year(text)
-    cleaned = clean_query_text(text)
-    cleaned = remove_year_tokens(cleaned)
-    region = extract_region(cleaned)
+def build(text: str) -> dict:
+    """
+    输入：自然语言，如 "搜索2026年湖北省政策"、"2023到2026年湖北省新能源政策"
+    返回：{年份区间, 地区, 域名锚点, 清洗后关键词, 最终搜索词, 模式}
+    """
+    from datetime import datetime as dt
 
+    # 0. 原始文本备用
+    raw = text.strip()
+
+    # 1. 提取年份区间
+    range_m = re.search(r'(20\d{2})\s*(?:到|至|-|~)\s*(20\d{2})\s*年?', raw)
+    if range_m:
+        start_year, end_year = sorted([range_m.group(1), range_m.group(2)])
+    else:
+        m = re.search(r'(20\d{2})年?', raw)
+        y = m.group(1) if m else str(dt.now().year)
+        start_year = end_year = y
+
+    # 2. 用原始文本识别省份（不受清洗影响）
+    region = extract_region(raw) or ''
+    if not region:
+        region = extract_region(re.sub(r'^去(搜索|找|查)', '', raw)) or ''
+
+    # 3. 清洗文本
+    cleaned = clean_query_text(raw)
+
+    # 4. 去掉"到"前缀（clean_query_text 加的）和年份
+    for prefix in ['去', '到']:
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):]
+            break
+
+    # 5. 去掉年份区间和单个年份
+    cleaned = re.sub(r'20\d{2}\s*(?:到|至|-|~)\s*20\d{2}年?', '', cleaned)
+    cleaned = re.sub(r'20\d{2}年?', '', cleaned)
+    cleaned = re.sub(r'\s+', '', cleaned).strip()
+
+    # 6. 去掉省份前缀
+    keyword = cleaned
+    if region:
+        # 去掉省份简称和全称
+        for alias in sorted(ALIASES.keys(), key=len, reverse=True):
+            full = ALIASES[alias]
+            if full == region:
+                for prefix in [alias, region]:
+                    if keyword.startswith(prefix):
+                        keyword = keyword[len(prefix):]
+                        break
+        # 去掉开头残留的"省"字
+        keyword = re.sub(r'^省+', '', keyword)
+
+    # 7. 只有省份没有任何其他词时才加"政策"
+    if not keyword.strip():
+        keyword = '政策'
+
+    year_field = f'{start_year}-01-01,{end_year}-12-31'
+
+    # 8. 根据模式组装
     if region == '全国':
-        keyword = cleaned if cleaned else '全国政策'
-        final_query = f'{year}年 {keyword} site:gov.cn'
         return {
-            '年份': year,
+            '年份': year_field,
             '地区': '全国',
             '域名锚点': 'gov.cn',
             '清洗后关键词': keyword,
-            '最终搜索词': final_query,
+            '最终搜索词': f'{keyword} site:www.gov.cn',
             '模式': '全国',
         }
-
-    if region and region in PROVINCE_DOMAINS:
+    elif region and region in PROVINCE_DOMAINS:
         site = PROVINCE_DOMAINS[region]
         host = host_of(site)
-        keyword = cleaned if cleaned else f'{region}政策'
-        final_query = f'{year}年 {keyword} site:{host}'
         return {
-            '年份': year,
+            '年份': year_field,
             '地区': region,
             '域名锚点': site,
             '清洗后关键词': keyword,
-            '最终搜索词': final_query,
+            '最终搜索词': f'{keyword} site:{host}',
             '模式': '单省',
         }
+    else:
+        return {
+            '年份': year_field,
+            '地区': '',
+            '域名锚点': 'gov.cn',
+            '清洗后关键词': keyword,
+            '最终搜索词': f'{keyword} site:www.gov.cn',
+            '模式': '普通',
+        }
 
-    keyword = cleaned or text.strip()
-    final_query = f'{year}年 {keyword} site:gov.cn'
-    return {
-        '年份': year,
-        '地区': '',
-        '域名锚点': 'gov.cn',
-        '清洗后关键词': keyword,
-        '最终搜索词': final_query,
-        '模式': '普通',
-    }
 
 
 def main():

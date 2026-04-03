@@ -3,16 +3,22 @@ set -euo pipefail
 
 QUERY="${1:-2026年 湖北省政策 site:www.hubei.gov.cn}"
 MAX_PAGES="${2:-3}"
+YEAR_RANGE="${3:-}"  # 格式: 2023-01-01,2026-12-31
 OUTDIR="$HOME/Desktop/h5"
 mkdir -p "$OUTDIR"
 
-YEAR=$(python3 - <<'PY'
+if [ -n "$YEAR_RANGE" ]; then
+    START_DATE=$(echo "$YEAR_RANGE" | cut -d',' -f1)
+    END_DATE=$(echo "$YEAR_RANGE" | cut -d',' -f2)
+else
+    YEAR=$(python3 - <<'PY'
 from datetime import datetime
 print(datetime.now().year)
 PY
 )
-START_DATE="${YEAR}-01-01"
-END_DATE="${YEAR}-12-31"
+    START_DATE="${YEAR}-01-01"
+    END_DATE="${YEAR}-12-31"
+fi
 STAMP=$(date +%Y%m%d_%H%M%S)
 SAFE_NAME=$(python3 - <<'PY' "$QUERY"
 import re, sys
@@ -59,7 +65,9 @@ tell application "Safari"
     if (count of windows) = 0 then
         make new document
     end if
-    set URL of front document to "$URL"
+    tell front window
+        set newTab to (make new tab with properties {URL:"$URL"})
+    end tell
 end tell
 OSA
 
@@ -135,13 +143,8 @@ done
 CLOSE_STATUS=$(/usr/bin/osascript <<'OSA'
 tell application "Safari"
     try
-        if (count of documents) = 1 then
-            set URL of front document to "about:blank"
-            return "REPLACED_WITH_BLANK_PAGE"
-        else
-            close front document
-            return "CLOSED_FRONT_DOCUMENT"
-        end if
+        close front document
+        return "CLOSED_FRONT_DOCUMENT"
     on error errMsg
         return "CLOSE_FAILED: " & errMsg
     end try

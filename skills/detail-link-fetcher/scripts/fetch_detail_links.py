@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import time
 import urllib.request
 from html import unescape
@@ -80,11 +81,7 @@ def extract_attachments(html: str) -> str:
 
 
 def derive_policy_id(url: str) -> str:
-    patterns = [
-        r'(t\d+_\d+)',
-        r'/([a-f0-9]{24,})\.shtml(?:\?|$)',
-        r'/([A-Za-z0-9_-]{16,})\.shtml(?:\?|$)',
-    ]
+    patterns = ['(t\\d+_\\d+)', '/([A-Za-z0-9_-]{16,})\\.shtml(?:\\?|$)', '/([a-f0-9]{24,})\\.shtml(?:\\?|$)', '/(\\d{10,})/', 'content[_-](\\d+)', '/info[_-](\\d+)', 'article[_-](\\d+)', 'show[_-](\\d+)', 'index[_-](\\d+)', 'page[_-](\\d+)', '[?&]id=(\\d+)', '[?&]id=(\\w+)', '[?&](?:newsId|articleId|contentId)=(\\w+)', '/(\\d{8,})/', '(\\d{8,}[-_]\\d+)', '/(\\d+)\\.html']
     for pat in patterns:
         m = re.search(pat, url, flags=re.I)
         if m:
@@ -245,12 +242,14 @@ def derive_name_from_links(link_md: Path) -> str:
 
 
 def main():
+    keyword = sys.argv[1] if len(sys.argv) > 1 else ''
     link_md = Path.home() / 'Desktop' / '处理文件夹' / '原文链接.md'
     out_dir = Path.home() / 'Desktop' / 'detail-h5'
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    keyword_name = derive_name_from_links(link_md)
-    out_excel = out_dir / f'{keyword_name}_{stamp}.xlsx'
+    keyword_name = keyword if keyword else derive_name_from_links(link_md)
+    safe_keyword = re.sub(r'[\\/:*?"<>|]+', '_', keyword_name)
+    out_excel = out_dir / f'{safe_keyword}_{stamp}.xlsx'
 
     text = link_md.read_text(encoding='utf-8', errors='ignore')
     raw_urls = re.findall(r'\((http[^)]+)\)', text)
