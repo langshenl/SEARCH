@@ -3,12 +3,12 @@
 import json, sys
 from pathlib import Path
 
-meta_file = Path.home() / ".search_meta.json"
+meta_file = Path.home() / '.search_meta.json'
 if meta_file.exists():
     try:
         meta = json.loads(meta_file.read_text())
-        print(meta.get("province", ""))
+        print(meta.get('province', ''))
     except:
-        print("")
+        print('')
 else:
-    print("")
+    print('')
