@@ -258,7 +258,7 @@ def main():
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-    col_widths = {'标题': 30, '正文': 50, '摘要': 30, '发文机关': 20, '发布时间': 15, '原始链接': 35, '关键词': 20, '类型': 12, '地区': 12}
+    col_widths = {'标题': 30, '正文': 50, '摘要': 30, '发文机关': 20, '发布时间': 15, '原始链接': 60, '关键词': 20, '类型': 12, '地区': 12}
     for row_idx, row in enumerate(rows, 2):
         for col_idx, col_name in enumerate(COLUMNS, 1):
             cell = ws.cell(row=row_idx, column=col_idx)
@@ -271,7 +271,7 @@ def main():
                     cell.font = Font(color='0563C1', underline='single')
             else:
                 cell.value = row[col_name]
-        ws.row_dimensions[row_idx].height = 20
+        ws.row_dimensions[row_idx].height = 60
 
     for col_idx, col_name in enumerate(COLUMNS, 1):
         col_letter = get_column_letter(col_idx)
