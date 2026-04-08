@@ -17,7 +17,18 @@ except Exception:
     sys.exit(2)
 
 COLUMNS = ["标题", "正文", "摘要", "发文机关", "发布时间", "原始链接", "关键词", "类型", "地区"]
-TYPE_HINTS = ["通知", "办法", "意见", "方案", "公告", "通告", "条例", "规定", "细则", "政策", "计划", "实施方案", "指引", "指南"]
+TYPE_RULES = [
+    ('项目申报', ['申报', '申报指南', '申报条件']),
+    ('发展规划', ['发展规划', '规划纲要', '规划']),
+    ('工作部署', ['工作要点', '工作方案', '通知', '召开', '部署']),
+    ('产业扶持', ['扶持', '支持', '奖补', '补贴', '若干措施', '支持措施']),
+    ('管理规范', ['管理办法', '办法', '细则', '监管']),
+    ('建设实施', ['建设方案', '建设', '实施']),
+    ('政策解读', ['解读', '答记者问']),
+    ('统计报告', ['统计公报', '工作报告', '报告', '执行情况']),
+    ('资金预算', ['预算', '资金', '财政']),
+    ('人才引进', ['人才', '引进']),
+]
 ORG_PATTERNS = [
     r"([^\n，。；]{2,40}(?:人民政府|人民法院|人民检察院|委员会|管理局|监管局|发展和改革委员会|发展改革委|财政厅|财政局|教育厅|教育局|商务厅|商务局|文旅厅|文化和旅游厅|博物馆|办公室))",
 ]
@@ -58,11 +69,11 @@ def first_match(patterns, text):
 
 
 def infer_type(title, summary, body):
-    text = ' '.join([title or '', summary or '', body or ''])
-    for hint in TYPE_HINTS:
-        if hint in text:
-            return hint
-    return '网页内容'
+    text = f'{title or ""} {summary or ""} {body or ""}'
+    for label, keywords in TYPE_RULES:
+        if any(k in text for k in keywords):
+            return label
+    return '综合管理'
 
 
 def infer_region(query, provided_region, text):
