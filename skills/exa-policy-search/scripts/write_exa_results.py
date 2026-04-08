@@ -251,12 +251,8 @@ def normalize_item(item, query, region):
     raw_text = (item.get('text') or item.get('content') or '').strip()
     raw_title = (item.get('title') or '').strip()
 
-    # 方案3：raw_text 疑似 Exa 采集不完整 → 回退到 exa_summary
-    if _is_text_defective(raw_text, raw_title) and exa_summary:
-        effective_text = exa_summary
-    else:
-        effective_text = raw_text
-
+    # 方案3：此处不负责过滤（过滤在 main() 做），只做清洗
+    effective_text = raw_text
     text = clean_text(effective_text, exa_summary)
 
     summary = first_sentence(text, max_len=120)
@@ -315,9 +311,16 @@ def main():
 
     valid_items = []
     invalid_count = 0
+    defective_count = 0
     for item in items:
         url = (item.get('url') or item.get('id') or '').strip()
+        raw_text = (item.get('text') or item.get('content') or '').strip()
+        raw_title = (item.get('title') or '').strip()
         if url and is_url_valid(url):
+            # 方案3补充：raw_text 疑似采集不完整 → 直接过滤
+            if _is_text_defective(raw_text, raw_title):
+                defective_count += 1
+                continue
             valid_items.append(item)
         else:
             invalid_count += 1
@@ -369,6 +372,7 @@ def main():
         'excel': str(xlsx_path),
         'count': len(rows),
         'invalid_count': invalid_count,
+        'defective_count': defective_count,
         'columns': COLUMNS,
     }, ensure_ascii=False))
 
