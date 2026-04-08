@@ -66,9 +66,18 @@ def first_sentence(text):
 
 
 def is_url_valid(url, timeout=5):
-    """弱校验：只拦明显死链，尽量避免误杀政府站链接"""
+    """方案一：先按 URL 规则硬过滤，再做弱校验"""
     if not url or not url.startswith(('http://', 'https://')):
         return False
+
+    low = url.lower()
+    # 列表页 / 索引页
+    if any(x in low for x in ['/list', '/index', '_index', '-index']):
+        return False
+    # 附件链接
+    if any(low.endswith('.' + x) or f'.{x}?' in low or f'.{x}' in low for x in ['pdf', 'doc', 'docx', 'ofd', 'xls', 'xlsx', 'zip', 'rar', '7z', 'tar', 'gz']):
+        return False
+
     try:
         req = urllib.request.Request(url)
         req.add_header('User-Agent', 'Mozilla/5.0')
