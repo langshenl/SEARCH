@@ -333,9 +333,10 @@ def main():
             invalid_count += 1
 
     rows = [normalize_item(item, query, region) for item in valid_items]
-    # 正文为空 → 过滤
-    rows = [r for r in rows if r['正文'].strip()]
-    empty_body_count = len(valid_items) - len(rows) - invalid_count
+    # 正文为空 或 正文字数<50 → 过滤
+    rows_before = rows
+    rows = [r for r in rows if len(r['正文'].strip()) >= 50]
+    empty_body_count = len(rows_before) - len(rows)
     safe = re.sub(r'[^\w\u4e00-\u9fff-]+', '_', query)[:60].strip('_') or 'exa-search'
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     out_dir = Path('~/Desktop/exa搜索文件夹').expanduser() / f'{safe}_{ts}'
