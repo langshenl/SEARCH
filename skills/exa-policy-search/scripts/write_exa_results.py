@@ -29,7 +29,7 @@ TYPE_RULES = [
     ('人才引进', ['人才', '引进']),
 ]
 ORG_PATTERNS = [
-    r"([^\n，。；]{2,40}(?:人民政府|人民法院|人民检察院|委员会|管理局|监管局|发展和改革委员会|发展改革委|财政厅|财政局|教育厅|教育局|商务厅|商务局|文旅厅|文化和旅游厅|博物馆|办公室))",
+    r"([^\n,。;]{2,40}(?:人民政府|人民法院|人民检察院|委员会|管理局|监管局|发展和改革委员会|发展改革委|财政厅|财政局|教育厅|教育局|商务厅|商务局|文旅厅|文化和旅游厅|博物馆|办公室))",
 ]
 DATE_PATTERNS = [
     r"(20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}日?)",
@@ -58,7 +58,7 @@ def normalize_date(date_text, expected_year=''):
 def first_sentence(text, max_len=100):
     if not text:
         return ''
-    for part in re.split(r'[。！？\n]+', text):
+    for part in re.split(r'[。!?\n]+', text):
         part = part.strip()
         if len(part) >= 8 and not any(w in part.lower() for w in [
             '当前位置', 'header', 'menu', '导航', '网站地图', '版权', 'copyright'
@@ -71,7 +71,7 @@ def first_two_sentences(text, max_len=160):
     if not text:
         return ''
     parts = []
-    for part in re.split(r'[。！？\n]+', text):
+    for part in re.split(r'[。!?\n]+', text):
         part = part.strip()
         if len(part) >= 8 and not any(w in part.lower() for w in [
             '当前位置', 'header', 'menu', '导航', '网站地图', '版权', 'copyright'
@@ -83,7 +83,7 @@ def first_two_sentences(text, max_len=160):
 
 
 def is_url_valid(url, timeout=5):
-    """方案一：先按 URL 规则硬过滤，再做弱校验"""
+    """方案一:先按 URL 规则硬过滤,再做弱校验"""
     if not url or not url.startswith(('http://', 'https://')):
         return False
 
@@ -145,11 +145,25 @@ def infer_region(query, provided_region, text):
     return '全国'
 
 
-def clean_text(text, summary=''):
-    """加强正文清洗：去 script/style/html 噪音，保留可读文本"""
+BAD_PAGE_SIGNALS = [
+    '404 not found', '页面不存在', '您访问的页面不存在', 'not found',
+    '内容不存在', '信息不存在', '已删除', '已失效',
+    '您访问的链接将离开', '是否继续', '离开"', '离开本站', '门户网站',
+    '当前链接', '离开“', '抱歉', '页面走丢',
+]
+
+NOISE_WORDS = [
+    'copyright', '版权所有', 'cookie', '隐私政策', '网站地图',
+    '请您登录', '请登录', '无障碍', '长者专区', 'loading',
+    'ajax', 'javascript', 'jquery', 'header 开始', 'header 结束',
+    'content 开始', '当前位置 开始', '当前位置 结束', '移动端菜单开始', '移动端菜单结束',
+]
+
+
+def _base_clean(text):
+    """轻清洗版：只做最基础处理，保留正文大部分内容"""
     if not text:
         return ''
-
     text = re.sub(r'!\[[^\]]*\]\([^\)]*\)', ' ', text)
     text = re.sub(r'#:~:text=[^\s\)]*', '', text)
     text = re.sub(r'<script[\s\S]*?</script>', ' ', text, flags=re.I)
@@ -160,25 +174,31 @@ def clean_text(text, summary=''):
     text = re.sub(r'&[a-zA-Z]{2,10};', ' ', text)
     text = re.sub(r'&#\d+;', ' ', text)
     text = re.sub(r'&#x[0-9a-fA-F]+;', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
-    cut_markers = ['您访问的链接将离开', '是否继续', '离开“', '离开本站', '门户网站']
-    for marker in cut_markers:
+
+def _heavy_clean(text):
+    """强清洗版：轻清洗基础上，截断离站提示+激进去噪音"""
+    if not text:
+        return ''
+    text = _base_clean(text)
+
+    # 截断离站提示
+    for marker in BAD_PAGE_SIGNALS:
         idx = text.find(marker)
         if idx != -1:
             text = text[:idx]
             break
 
+    # 去掉 js/ajax 残留
+    text = re.sub(r'\bvar\s+\$?\w+\s*=.*?;', ' ', text, flags=re.I)
+    text = re.sub(r'\$\.ajax\(|jQuery\(|\$\(function', ' ', text, flags=re.I)
+    text = re.sub(r'https?://[^\s]{5,200}', ' ', text, flags=re.I)
+    text = re.sub(r'\bfunction\s*\w+\s*\([^)]*\)\s*\{', ' ', text, flags=re.I)
     text = re.sub(r'\s+', ' ', text)
 
-    noise_patterns = [
-        r'\bvar\s+\$?\w+\s*=.*?;',
-        r'\$\.ajax\(|jQuery\(|\$\(function',
-        r'https?://[^\s]{5,200}',
-        r'\bfunction\s*\w+\s*\([^)]*\)\s*\{',
-    ]
-    for p in noise_patterns:
-        text = re.sub(p, ' ', text, flags=re.I)
-
+    # 按段落切，丢弃噪音段落
     parts = re.split(r'(?<=[。！？；])\s*', text)
     cleaned = []
     seen = set()
@@ -186,18 +206,63 @@ def clean_text(text, summary=''):
         part = part.strip()
         if len(part) < 8:
             continue
-        if any(w in part.lower() for w in [
-            'copyright', '版权所有', 'cookie', '隐私政策', '网站地图',
-            '请您登录', '请登录', '无障碍', '长者专区', 'loading',
-            'ajax', 'javascript', 'jquery', 'header 开始', 'header 结束',
-            'content 开始', '当前位置 开始', '当前位置 结束', '移动端菜单开始', '移动端菜单结束'
-        ]):
+        if any(w in part.lower() for w in NOISE_WORDS):
             continue
         key = part[:40].strip().lower()
         if key and key not in seen:
             seen.add(key)
             cleaned.append(part)
     return '\n'.join(cleaned)
+
+
+def _has_bad_signals(text):
+    """检查正文是否含有坏页特征"""
+    if not text:
+        return True
+    low = text.lower()
+    return any(s in low for s in BAD_PAGE_SIGNALS)
+
+
+def _body_score(text):
+    """正文质量评分：句子数量×长度加权，排除噪音"""
+    if not text:
+        return 0
+    sentences = re.split(r'[。！？；\n]', text)
+    score = 0
+    for s in sentences:
+        s = s.strip()
+        if len(s) < 8:
+            continue
+        if any(w in s.lower() for w in NOISE_WORDS):
+            continue
+        score += min(len(s), 100)
+    return score
+
+
+def clean_text(text, summary=''):
+    """双版本清洗：默认轻清洗，坏页切强清洗，强清洗太短则回退"""
+    if not text:
+        return ''
+
+    light = _base_clean(text)
+
+    # 默认用轻清洗结果
+    if not _has_bad_signals(light):
+        chosen = light
+    else:
+        # 坏页 → 尝试强清洗
+        heavy = _heavy_clean(text)
+        if len(heavy) >= 80 and _body_score(heavy) > _body_score(light):
+            chosen = heavy
+        else:
+            # 强清洗太短或更差 → 回退轻清洗
+            chosen = light
+
+    # 最终若太轻，回退轻清洗保底
+    if _body_score(chosen) < 30:
+        chosen = light
+
+    return chosen
 
 
 def normalize_item(item, query, region):
