@@ -57,31 +57,34 @@ def fetch_url_meta(url, timeout=5):
 
 
 def score_confidence(result_title, summary, body, meta):
-    if not meta.get('ok'):
-        return '低可信'
-    page_title = meta.get('title', '') or ''
-    final_url = meta.get('final_url', '') or ''
-    low_title = result_title.lower()
-    low_page = page_title.lower()
-    low_summary = (summary or '').lower()
+    page_title = (meta.get('title', '') or '').lower()
+    final_url = (meta.get('final_url', '') or '').lower()
     low_body = (body or '').lower()
 
+    # 404 / 错误页直接低可信
+    if (not meta.get('ok')) or any(k in page_title for k in ['404', 'not found', '错误', '出错']) or any(k in final_url for k in ['/404', 'error']):
+        return '低可信'
+
+    # 栏目页 / 首页 / 列表页：低可信
+    bad_page_signals = ['首页', '列表', '栏目', '频道', '当前位置', '欢迎访问', '网站首页']
+    if any(k in page_title for k in bad_page_signals):
+        return '低可信'
+
+    # 标题弱相似：命中任意核心词即可
     title_hit = 0
     for token in re.findall(r'[\u4e00-\u9fffA-Za-z0-9]{2,}', result_title)[:6]:
-        if token.lower() in low_page:
+        if token.lower() in page_title:
             title_hit += 1
-    summary_hit = 0
-    for token in re.findall(r'[\u4e00-\u9fffA-Za-z0-9]{2,}', summary)[:8]:
-        if token.lower() in low_body:
-            summary_hit += 1
 
-    if any(k in low_page for k in ['404', 'not found', '错误', '出错']) or any(k in final_url.lower() for k in ['/404', 'error']):
+    # 正文只看是否明显为空 / 明显不相关
+    if len((body or '').strip()) < 30:
         return '低可信'
-    if title_hit >= 2 and summary_hit >= 2:
+
+    if title_hit >= 2:
         return '高可信'
-    if title_hit >= 1 or summary_hit >= 1:
+    if title_hit >= 1:
         return '中可信'
-    return '低可信'
+    return '中可信'
 
 
 def first_match(patterns, text):
@@ -183,9 +186,8 @@ def main():
     else:
         items = []
 
-    rows_all = [normalize_item(item, query, region) for item in items]
-    invalid_count = sum(1 for r in rows_all if r['可信度'] == '低可信')
-    rows = [r for r in rows_all if r['可信度'] != '低可信']
+    rows = [normalize_item(item, query, region) for item in items]
+    invalid_count = sum(1 for r in rows if r['可信度'] == '低可信')
     safe = re.sub(r'[^\w\u4e00-\u9fff-]+', '_', query)[:60].strip('_') or 'exa-search'
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     out_dir = Path('~/Desktop/exa搜索文件夹').expanduser() / f'{safe}_{ts}'
