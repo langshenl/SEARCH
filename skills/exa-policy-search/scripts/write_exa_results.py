@@ -76,13 +76,50 @@ def infer_region(query, provided_region, text):
     return '全国'
 
 
+def clean_text(text, summary=''):
+    """清洗正文：去噪、去重复句子、清理HTML残留"""
+    if not text:
+        return text
+    # 去除HTML标签残留
+    text = re.sub(r'<[^>]{1,50}>', '', text)
+    text = re.sub(r'&[a-zA-Z]{1,10};', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    lines = text.split('。')
+    # 去除重复句子（与摘要相同的句子在正文中去除）
+    if summary:
+        summary_short = summary[:50]  # 取摘要前50字
+        lines = [l for l in lines if summary_short not in l][:50]
+    else:
+        lines = lines[:50]
+    # 去除噪声行（广告、导航、版权声明等短句）
+    noise_patterns = [
+        r'^\s*\d+$',  # 纯数字行
+        r'^\s*[一二三四五六七八九十]{1,3}\s*$',  # 纯序号行
+        r'^\s*(版权所有|copyright|转载|来源|声明|技术支持|网站地图|联系我们|登录|注册)\s*$',
+        r'^\s*[(（]?[a-zA-Z]{3,20}[)）]?\s*$',  # 纯英文词
+        r'^\s*[|\-－_]{3,}\s*$',  # 分隔线
+    ]
+    cleaned_lines = []
+    for line in lines:
+        line = line.strip()
+        if len(line) < 8:  # 少于8字的行跳过
+            continue
+        is_noise = False
+        for pattern in noise_patterns:
+            if re.search(pattern, line, re.IGNORECASE):
+                is_noise = True
+                break
+        if not is_noise:
+            cleaned_lines.append(line)
+    return '。'.join(cleaned_lines)
+
+
 def normalize_item(item, query, region):
     title = (item.get('title') or '').strip()
     url = (item.get('url') or item.get('id') or '').strip()
     summary = (item.get('summary') or item.get('snippet') or '').strip()
     text = (item.get('text') or item.get('content') or summary).strip()
-    if len(text) > 4000:
-        text = text[:4000]
+    text = clean_text(text, summary)
     org = first_match(ORG_PATTERNS, '\n'.join([title, summary, text]))
     publish_date = first_match(DATE_PATTERNS, '\n'.join([title, summary, text]))
     row_region = infer_region(query, region, '\n'.join([title, summary, text]))
