@@ -38,6 +38,33 @@ DATE_PATTERNS = [
 ]
 
 
+def normalize_date(date_text, expected_year=''):
+    if not date_text:
+        return ''
+    date_text = str(date_text).strip()
+    m = re.search(r'(20\d{2})', date_text)
+    if expected_year and (not m or m.group(1) != expected_year):
+        return ''
+    m2 = re.search(r'(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})', date_text)
+    if m2:
+        y, mo, d = m2.groups()
+        return f'{y}-{int(mo):02d}-{int(d):02d}'
+    m3 = re.search(r'(20\d{2})-(\d{2})-(\d{2})', date_text)
+    if m3:
+        return f'{m3.group(1)}-{m3.group(2)}-{m3.group(3)}'
+    return date_text if (not expected_year or expected_year in date_text) else ''
+
+
+def first_sentence(text):
+    if not text:
+        return ''
+    for part in re.split(r'[。！？\n]+', text):
+        part = part.strip()
+        if len(part) >= 8:
+            return part[:60]
+    return ''
+
+
 def is_url_valid(url, timeout=5):
     """弱校验：只拦明显死链，尽量避免误杀政府站链接"""
     if not url or not url.startswith(('http://', 'https://')):
@@ -134,13 +161,32 @@ def clean_text(text, summary=''):
 
 
 def normalize_item(item, query, region):
-    title = (item.get('title') or '').strip()
+    expected_year_match = re.search(r'(20\d{2})', query or '')
+    expected_year = expected_year_match.group(1) if expected_year_match else ''
+
     url = (item.get('url') or item.get('id') or '').strip()
     summary = (item.get('summary') or item.get('snippet') or '').strip()
     raw_text = (item.get('text') or item.get('content') or '').strip()
     text = clean_text(raw_text, summary)
+
+    title = (item.get('title') or '').strip()
+    if not title:
+        title = first_sentence(text) or first_sentence(summary) or '标题缺失'
+
     org = first_match(ORG_PATTERNS, '\n'.join([title, summary, text]))
-    publish_date = first_match(DATE_PATTERNS, '\n'.join([title, summary, text]))
+
+    exa_date = (
+        item.get('publishedDate')
+        or item.get('published_date')
+        or item.get('publishDate')
+        or item.get('publish_date')
+        or ''
+    )
+    publish_date = normalize_date(exa_date, expected_year)
+    if not publish_date:
+        body_date = first_match(DATE_PATTERNS, '\n'.join([title, summary, text]))
+        publish_date = normalize_date(body_date, expected_year)
+
     row_region = infer_region(query, region, '\n'.join([title, summary, text]))
     doc_type = infer_type(title, summary, text)
     return {
