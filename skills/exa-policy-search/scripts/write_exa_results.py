@@ -8,6 +8,8 @@ from pathlib import Path
 
 try:
     from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.utils import get_column_letter
 except Exception:
     print('missing dependency: openpyxl', file=sys.stderr)
     sys.exit(2)
@@ -100,8 +102,40 @@ def main():
     ws = wb.active
     ws.title = '搜索结果'
     ws.append(COLUMNS)
-    for row in rows:
-        ws.append([row[c] for c in COLUMNS])
+
+    # Header style
+    header_font = Font(bold=True)
+    header_fill = PatternFill(fill_type='solid', fgColor='D9E1F2')
+    for col_idx, col_name in enumerate(COLUMNS, 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    # Data rows
+    url_col_idx = COLUMNS.index('原始链接') + 1
+    col_widths = {'标题': 30, '正文': 50, '摘要': 30, '发文机关': 20, '发布时间': 15, '原始链接': 35, '关键词': 20, '类型': 12, '地区': 12}
+    for row_idx, row in enumerate(rows, 2):
+        for col_idx, col_name in enumerate(COLUMNS, 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.alignment = Alignment(vertical='top', wrap_text=True)
+            if col_name == '原始链接':
+                url = row[col_name]
+                if url:
+                    cell.hyperlink = url
+                    cell.value = url
+                    cell.font = Font(color='0563C1', underline='single')
+            else:
+                cell.value = row[col_name]
+        ws.row_dimensions[row_idx].height = 20
+
+    # Set column widths
+    for col_idx, col_name in enumerate(COLUMNS, 1):
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].width = col_widths.get(col_name, 15)
+
+    # Header row height
+    ws.row_dimensions[1].height = 22
     xlsx_path = out_dir / '搜索结果.xlsx'
     wb.save(xlsx_path)
 
