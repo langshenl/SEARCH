@@ -67,6 +67,21 @@ def first_sentence(text, max_len=100):
     return ''
 
 
+def first_two_sentences(text, max_len=160):
+    if not text:
+        return ''
+    parts = []
+    for part in re.split(r'[。！？\n]+', text):
+        part = part.strip()
+        if len(part) >= 8 and not any(w in part.lower() for w in [
+            '当前位置', 'header', 'menu', '导航', '网站地图', '版权', 'copyright'
+        ]):
+            parts.append(part)
+        if len(parts) >= 2:
+            break
+    return '。'.join(parts)[:max_len]
+
+
 def is_url_valid(url, timeout=5):
     """方案一：先按 URL 规则硬过滤，再做弱校验"""
     if not url or not url.startswith(('http://', 'https://')):
@@ -184,7 +199,11 @@ def normalize_item(item, query, region):
     raw_text = (item.get('text') or item.get('content') or '').strip()
     text = clean_text(raw_text, exa_summary)
 
-    summary = first_sentence(text, max_len=120) or exa_summary or first_sentence(raw_text, max_len=120)
+    summary = first_sentence(text, max_len=120)
+    if len(summary) < 50:
+        summary = first_two_sentences(text, max_len=160) or summary
+    if not summary:
+        summary = exa_summary or first_two_sentences(raw_text, max_len=160) or first_sentence(raw_text, max_len=120)
 
     title = (item.get('title') or '').strip()
     if not title:
