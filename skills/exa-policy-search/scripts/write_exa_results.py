@@ -258,51 +258,81 @@ def normalize_item(item, query, region):
 
 
 def _summarize(rows, query):
-    """生成学术风格的搜索结果摘要"""
+    """生成深度总结，从实际内容中提取关键信息，不套用固定模板"""
     if not rows:
         return f"未找到与「{query}」相关的结果。"
 
     total = len(rows)
 
-    # 按类型统计
-    type_count = {}
-    for r in rows:
-        t = r.get('类型', '未知')
-        type_count[t] = type_count.get(t, 0) + 1
-    top_types = sorted(type_count.items(), key=lambda x: -x[1])[:6]
-
-    # 合并所有正文和标题做主题分析
-    all_text = ' '.join([r.get('标题', '') + ' ' + r.get('正文', '') for r in rows])
-
-    # 推断政策主题（按关键词命中）
-    themes = []
-    theme_hits = {
-        '新能源开发与利用': ['新能源', '光伏', '风电', '储能', '充电桩', '氢能', '生物质能'],
-        '财政扶持与价格机制': ['电价', '补贴', '财政', '奖补', '预算', '资金', '税收', '优惠'],
-        '项目建设与产业布局': ['项目', '建设', '投资', '产业', '园区', '基地', '集群'],
-        '新能源汽车推广': ['新能源汽车', '电动汽车', '充电设施', '汽车下乡', '绿车'],
-        '节能降碳与绿色发展': ['节能', '降碳', '碳达峰', '碳中和', '绿色', '排放', '减排'],
-        '发展规划与实施方案': ['规划', '方案', '意见', '计划', '纲要', '要点'],
-        '资源交易与市场机制': ['交易', '招标', '投标', '采购', '竞价', '市场'],
+    # 1. 提取高频关键词（人名/机构名/事件名）
+    stopwords = {
+        '的', '了', '和', '在', '对', '为', '以及', '等', '或', '与', '关于', '转发', '通知', '工作', '活动',
+        '发布', '开展', '进行', '请', '各', '该', '将', '已', '如下', '来源', '日期', '时间', '记者',
+        '北京', '上海', '广州', '深圳', '成都', '杭州', '南京', '武汉', '西安', '重庆', '天津',
+        'com', 'cn', 'www', 'http', 'https', 'html', 'htm',
     }
-    for theme, kws in theme_hits.items():
-        if sum(1 for kw in kws if kw in all_text) >= 2:
-            themes.append(theme)
-    theme_str = '、'.join(themes[:4]) if themes else '综合性政策'
+    word_count = {}
+    for r in rows:
+        text = r.get('标题', '') + ' ' + (r.get('摘要', '') or '') + ' ' + (r.get('正文', '') or '')
+        for w in re.findall(r'[\u4e00-\u9fff]{2,6}', text):
+            if w not in stopwords and len(w) >= 2:
+                word_count[w] = word_count.get(w, 0) + 1
 
-    lines = [
-        f"本次检索共获得 {total} 项政策文件，涵盖以下主题：",
-        f"",
-        f"【内容主题】{theme_str}",
-        f"",
-        f"【文件类型】",
-    ]
-    for t, c in top_types:
-        pct = c / total * 100
-        lines.append(f"  · {t}：{c}项（{pct:.0f}%）")
+    top_words = sorted(word_count.items(), key=lambda x: -x[1])[:12]
+    focus_phrases = [w for w, c in top_words if c >= 2]
+
+    # 2. 提取正文中最有信息量的句子
+    first_sents = []
+    for r in rows:
+        body = r.get('正文', '').strip()
+        if body:
+            for s in re.split(r'[。！？\n]', body):
+                s = s.strip()
+                if 15 <= len(s) <= 200:
+                    first_sents.append(s)
+                    break
+
+    # 3. 识别权威来源
+    authority_kws = ['新华社', '人民日报', '央视', '政府网', '官方网站', '国务院', '发改委', '工信部', '交通运输部']
+    official_count = sum(
+        1 for r in rows
+        if any(kw in (r.get('标题', '') + ' ' + (r.get('摘要', '') or '')).lower() for kw in authority_kws)
+    )
+
+    # 4. 判断内容主题方向
+    all_text = ' '.join([r.get('标题', '') + ' ' + (r.get('摘要', '') or '') + ' ' + (r.get('正文', '') or '') for r in rows])
+    topic_groups = {
+        '事件/事故': ['宕机', '故障', '停运', '事故', '投诉', '纠纷', '暂停', '下线', '异常'],
+        '技术/产品': ['算法', '自动驾驶', '无人驾驶', '智能网联', 'robotaxi', 'L4', '自动驾驶技术'],
+        '政策/监管': ['政策', '监管', '规定', '办法', '意见', '标准', '规范', '许可', '牌照', '资质'],
+        '市场/商业': ['商业化', '运营', '市场', '商业', '盈利', '成本', '竞争', '投放', '规模化'],
+        '舆情/争议': ['争议', '质疑', '安全', '隐患', '风险', '舆论', '公众', '司机', '就业', '替代'],
+    }
+    detected = [t for t, kws in topic_groups.items() if sum(1 for kw in kws if kw in all_text) >= 2]
+
+    focus_str = '、'.join(focus_phrases[:6]) if focus_phrases else '相关内容'
+    official_pct = official_count / total * 100
+    official_str = f"其中约 {official_pct:.0f}% 来源于权威媒体或政府官网" if official_count > 0 else "来源较为分散"
+
+    lines = [f"本次检索共获得 {total} 项结果，"]
+
+    if focus_phrases:
+        lines.append(f"")
+        lines.append(f"【内容概要】{focus_str}")
+
+    if detected:
+        lines.append(f"")
+        lines.append(f"【主题方向】{'、'.join(detected)}")
+
+    if first_sents:
+        best = sorted(first_sents, key=len, reverse=True)[:3]
+        lines.append(f"")
+        lines.append(f"【代表性内容】")
+        for s in best:
+            lines.append(f"  {s[:150]}...")
 
     lines.append(f"")
-    lines.append(f"【研究说明】上述文件主要围绕{themes[0] if themes else '政策体系建设'}等议题展开，从顶层规划、财政支持、项目实施等多维度呈现地方政策动态。")
+    lines.append(f"【来源说明】{official_str}，建议引用前核实链接有效性。")
 
     return '\n'.join(lines)
 
