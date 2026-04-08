@@ -257,6 +257,60 @@ def normalize_item(item, query, region):
     }
 
 
+def _summarize(rows, query):
+    """生成搜索结果摘要，用自然语言汇报"""
+    if not rows:
+        return f"未找到与「{query}」相关的结果。"
+
+    total = len(rows)
+
+    # 按类型统计
+    type_count = {}
+    for r in rows:
+        t = r.get('类型', '未知')
+        type_count[t] = type_count.get(t, 0) + 1
+    top_types = sorted(type_count.items(), key=lambda x: -x[1])[:5]
+    type_str = '、'.join([f"{t}({c}条)" for t, c in top_types])
+
+    # 按年份统计（有发布时间的）
+    years = {}
+    for r in rows:
+        pd = r.get('发布时间', '')
+        if pd and len(pd) >= 4:
+            y = pd[:4]
+            years[y] = years.get(y, 0) + 1
+    year_str = '、'.join([f"{y}年({c}条)" for y, c in sorted(years.items(), reverse=True)]) if years else '时间信息不足'
+
+    # 标题关键词词云（统计高频词）
+    word_count = {}
+    stopwords = {'的', '了', '和', '在', '对', '为', '以及', '等', '或', '与', '关于', '关于', '转发', '通知', '工作', '活动', '发布', '开展', '进行'}
+    for r in rows:
+        for w in re.findall(r'[\u4e00-\u9fff]{2,}', r.get('标题', '')):
+            if w not in stopwords and len(w) >= 2:
+                word_count[w] = word_count.get(w, 0) + 1
+    top_words = sorted(word_count.items(), key=lambda x: -x[1])[:8]
+    word_str = '、'.join([f"{w}" for w, c in top_words]) if top_words else ''
+
+    # 正文长度分布
+    body_lens = [len(r.get('正文', '')) for r in rows]
+    avg_len = sum(body_lens) // total if total else 0
+    rich = sum(1 for l in body_lens if l >= 1000)
+    sparse = sum(1 for l in body_lens if l < 200)
+
+    lines = [
+        f"本次搜索「{query}」，共筛选出 **{total} 条**结果，汇总如下：",
+        f"",
+        f"📋 类型分布：{type_str}",
+        f"📅 时间分布：{year_str}",
+        f"📝 正文字数：平均 {avg_len} 字/篇，其中正文较丰富（≥1000字）{rich} 篇、正文较短（<200字）{sparse} 篇",
+    ]
+    if word_str:
+        lines.append(f"🔍 标题高频词：{word_str}")
+    lines.append(f"")
+    lines.append(f"📁 详细数据已保存至桌面 exa搜索文件夹。")
+    return '\n'.join(lines)
+
+
 def main():
     if len(sys.argv) < 4:
         print('usage: write_exa_results.py <input_json> <query> <region>', file=sys.stderr)
@@ -326,6 +380,11 @@ def main():
     ws.row_dimensions[1].height = 22
     xlsx_path = out_dir / '搜索结果.xlsx'
     wb.save(xlsx_path)
+
+    # 生成并打印自然语言总结
+    summary_msg = _summarize(rows, query)
+    print(summary_msg)
+    print()
 
     print(json.dumps({
         'output_dir': str(out_dir),
