@@ -16,7 +16,7 @@ except Exception:
     print('missing dependency: openpyxl', file=sys.stderr)
     sys.exit(2)
 
-COLUMNS = ["标题", "正文", "摘要", "发文机关", "发布时间", "原始链接", "关键词", "类型", "地区"]
+COLUMNS = ["标题", "正文", "摘要", "发文机关", "发布时间", "原始链接", "关键词", "类型", "地区", "可信度"]
 TYPE_RULES = [
     ('项目申报', ['申报', '申报指南', '申报条件']),
     ('发展规划', ['发展规划', '规划纲要', '规划']),
@@ -39,25 +39,49 @@ DATE_PATTERNS = [
 ]
 
 # URL validation: returns True if URL is accessible (not 404/4xx/5xx)
-def is_url_valid(url, timeout=5):
+def fetch_url_meta(url, timeout=5):
     if not url or not url.startswith(('http://', 'https://')):
-        return False
+        return {'ok': False, 'status': None, 'final_url': '', 'title': ''}
     try:
-        req = urllib.request.Request(url, method='HEAD')
+        req = urllib.request.Request(url, method='GET')
         req.add_header('User-Agent', 'Mozilla/5.0')
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             status = resp.getcode()
-            return status < 400
+            final_url = resp.geturl()
+            content = resp.read(120000).decode('utf-8', errors='ignore')
+            m = re.search(r'<title>(.*?)</title>', content, re.I | re.S)
+            title = re.sub(r'\s+', ' ', m.group(1)).strip() if m else ''
+            return {'ok': status < 400, 'status': status, 'final_url': final_url, 'title': title, 'content': content}
     except Exception:
-        # Fallback: try GET request
-        try:
-            req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'Mozilla/5.0')
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                status = resp.getcode()
-                return status < 400
-        except Exception:
-            return False
+        return {'ok': False, 'status': None, 'final_url': '', 'title': '', 'content': ''}
+
+
+def score_confidence(result_title, summary, body, meta):
+    if not meta.get('ok'):
+        return '低可信'
+    page_title = meta.get('title', '') or ''
+    final_url = meta.get('final_url', '') or ''
+    low_title = result_title.lower()
+    low_page = page_title.lower()
+    low_summary = (summary or '').lower()
+    low_body = (body or '').lower()
+
+    title_hit = 0
+    for token in re.findall(r'[\u4e00-\u9fffA-Za-z0-9]{2,}', result_title)[:6]:
+        if token.lower() in low_page:
+            title_hit += 1
+    summary_hit = 0
+    for token in re.findall(r'[\u4e00-\u9fffA-Za-z0-9]{2,}', summary)[:8]:
+        if token.lower() in low_body:
+            summary_hit += 1
+
+    if any(k in low_page for k in ['404', 'not found', '错误', '出错']) or any(k in final_url.lower() for k in ['/404', 'error']):
+        return '低可信'
+    if title_hit >= 2 and summary_hit >= 2:
+        return '高可信'
+    if title_hit >= 1 or summary_hit >= 1:
+        return '中可信'
+    return '低可信'
 
 
 def first_match(patterns, text):
@@ -124,6 +148,8 @@ def normalize_item(item, query, region):
     summary = (item.get('summary') or item.get('snippet') or '').strip()
     raw_text = (item.get('text') or item.get('content') or summary).strip()
     text = clean_text(raw_text, summary)
+    meta = fetch_url_meta(url)
+    confidence = score_confidence(title, summary, text, meta)
     org = first_match(ORG_PATTERNS, '\n'.join([title, summary, text]))
     publish_date = first_match(DATE_PATTERNS, '\n'.join([title, summary, text]))
     row_region = infer_region(query, region, '\n'.join([title, summary, text]))
@@ -138,6 +164,7 @@ def normalize_item(item, query, region):
         '关键词': query,
         '类型': doc_type,
         '地区': row_region,
+        '可信度': confidence,
     }
 
 
@@ -156,17 +183,9 @@ def main():
     else:
         items = []
 
-    # Validate URLs and filter out invalid ones
-    valid_items = []
-    invalid_count = 0
-    for item in items:
-        url = (item.get('url') or item.get('id') or '').strip()
-        if url and is_url_valid(url):
-            valid_items.append(item)
-        else:
-            invalid_count += 1
-
-    rows = [normalize_item(item, query, region) for item in valid_items]
+    rows_all = [normalize_item(item, query, region) for item in items]
+    invalid_count = sum(1 for r in rows_all if r['可信度'] == '低可信')
+    rows = [r for r in rows_all if r['可信度'] != '低可信']
     safe = re.sub(r'[^\w\u4e00-\u9fff-]+', '_', query)[:60].strip('_') or 'exa-search'
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     out_dir = Path('~/Desktop/exa搜索文件夹').expanduser() / f'{safe}_{ts}'
@@ -188,7 +207,7 @@ def main():
 
     # Data rows
     url_col_idx = COLUMNS.index('原始链接') + 1
-    col_widths = {'标题': 30, '正文': 50, '摘要': 30, '发文机关': 20, '发布时间': 15, '原始链接': 35, '关键词': 20, '类型': 12, '地区': 12}
+    col_widths = {'标题': 30, '正文': 50, '摘要': 30, '发文机关': 20, '发布时间': 15, '原始链接': 35, '关键词': 20, '类型': 12, '地区': 12, '可信度': 12}
     for row_idx, row in enumerate(rows, 2):
         for col_idx, col_name in enumerate(COLUMNS, 1):
             cell = ws.cell(row=row_idx, column=col_idx)
