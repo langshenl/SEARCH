@@ -55,13 +55,15 @@ def normalize_date(date_text, expected_year=''):
     return date_text if (not expected_year or expected_year in date_text) else ''
 
 
-def first_sentence(text):
+def first_sentence(text, max_len=100):
     if not text:
         return ''
     for part in re.split(r'[。！？\n]+', text):
         part = part.strip()
-        if len(part) >= 8:
-            return part[:60]
+        if len(part) >= 8 and not any(w in part.lower() for w in [
+            '当前位置', 'header', 'menu', '导航', '网站地图', '版权', 'copyright'
+        ]):
+            return part[:max_len]
     return ''
 
 
@@ -174,9 +176,11 @@ def normalize_item(item, query, region):
     expected_year = expected_year_match.group(1) if expected_year_match else ''
 
     url = (item.get('url') or item.get('id') or '').strip()
-    summary = (item.get('summary') or item.get('snippet') or '').strip()
+    exa_summary = (item.get('summary') or item.get('snippet') or '').strip()
     raw_text = (item.get('text') or item.get('content') or '').strip()
-    text = clean_text(raw_text, summary)
+    text = clean_text(raw_text, exa_summary)
+
+    summary = first_sentence(text, max_len=120) or exa_summary or first_sentence(raw_text, max_len=120)
 
     title = (item.get('title') or '').strip()
     if not title:
