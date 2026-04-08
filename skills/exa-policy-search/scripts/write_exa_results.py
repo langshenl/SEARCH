@@ -145,46 +145,6 @@ def infer_region(query, provided_region, text):
     return '全国'
 
 
-# 方案3：检测 raw_text 是否疑似 Exa 采集不完整（残次品）
-_TRASH_TEXT_SIGNALS = [
-    '政府工作报告 -', '页面不存在', '404 not found', '您访问的页面',
-    '当前位置', '网站地图', 'copyright', '版权所有',
-]
-
-
-def _is_text_defective(raw_text, title):
-    """
-    判断 raw_text 是否疑似 Exa 采集不完整，需要回退到 summary。
-    触发条件（满足任一）：
-    1. text 太短（<120字）且 title 在开头重复度高
-    2. text 太短且有效句子极少（<2句）
-    3. text 前60字命中明显是页面模板词（导航/标题等）
-    """
-    if not raw_text:
-        return True
-
-    length = len(raw_text)
-
-    # 条件1：长度 < 120 且 title 在前30字重复
-    if length < 120 and title:
-        title_head = title.strip()[:20]
-        if title_head and title_head in raw_text[:50]:
-            return True
-
-    # 条件2：长度 < 100 且句子数少
-    if length < 100:
-        sentences = re.split(r'[。！？；\n]', raw_text)
-        meaningful = [s for s in sentences if len(s.strip()) >= 6]
-        if len(meaningful) < 2:
-            return True
-
-    # 条件3：前60字含明显模板词
-    head60 = raw_text[:60].lower()
-    if any(s in head60 for s in _TRASH_TEXT_SIGNALS):
-        return True
-
-    return False
-
 
 def clean_text(text, summary=''):
     """加强正文清洗：去 script/style/html 噪音，保留可读文本"""
@@ -265,6 +225,9 @@ def normalize_item(item, query, region):
     if not title:
         title = first_sentence(text) or first_sentence(summary) or '标题缺失'
 
+    # 标题去噪声：去掉页面顶部导航残留词
+    title = re.sub(r'^(政府工作报告|页面不存在|404).*?[-–—]\s*', '', title)
+
     org = first_match(ORG_PATTERNS, '\n'.join([title, summary, text]))
 
     exa_date = (
@@ -311,21 +274,18 @@ def main():
 
     valid_items = []
     invalid_count = 0
-    defective_count = 0
+    empty_body_count = 0
     for item in items:
         url = (item.get('url') or item.get('id') or '').strip()
-        raw_text = (item.get('text') or item.get('content') or '').strip()
-        raw_title = (item.get('title') or '').strip()
         if url and is_url_valid(url):
-            # 方案3补充：raw_text 疑似采集不完整 → 直接过滤
-            if _is_text_defective(raw_text, raw_title):
-                defective_count += 1
-                continue
             valid_items.append(item)
         else:
             invalid_count += 1
 
     rows = [normalize_item(item, query, region) for item in valid_items]
+    # 正文为空 → 过滤
+    rows = [r for r in rows if r['正文'].strip()]
+    empty_body_count = len(valid_items) - len(rows) - invalid_count
     safe = re.sub(r'[^\w\u4e00-\u9fff-]+', '_', query)[:60].strip('_') or 'exa-search'
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     out_dir = Path('~/Desktop/exa搜索文件夹').expanduser() / f'{safe}_{ts}'
@@ -372,7 +332,7 @@ def main():
         'excel': str(xlsx_path),
         'count': len(rows),
         'invalid_count': invalid_count,
-        'defective_count': defective_count,
+        'empty_body_count': empty_body_count,
         'columns': COLUMNS,
     }, ensure_ascii=False))
 
