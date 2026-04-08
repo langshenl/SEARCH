@@ -82,7 +82,7 @@ def first_two_sentences(text, max_len=160):
     return '。'.join(parts)[:max_len]
 
 
-def is_url_valid(url, timeout=5):
+def is_url_valid(url, timeout=3):
     """方案一：先按 URL 规则硬过滤，再做弱校验"""
     if not url or not url.startswith(('http://', 'https://')):
         return False
