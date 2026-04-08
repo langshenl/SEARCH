@@ -105,19 +105,9 @@ def main():
     xlsx_path = out_dir / '搜索结果.xlsx'
     wb.save(xlsx_path)
 
-    log_path = out_dir / '搜索日志.md'
-    with log_path.open('w', encoding='utf-8') as f:
-        f.write(f'# Exa 搜索日志\n\n')
-        f.write(f'- 关键词: {query}\n')
-        f.write(f'- 地区: {region}\n')
-        f.write(f'- 结果数: {len(rows)}\n')
-        f.write(f'- 生成时间: {datetime.now().isoformat()}\n')
-        f.write(f'- Excel: {xlsx_path}\n')
-
     print(json.dumps({
         'output_dir': str(out_dir),
         'excel': str(xlsx_path),
-        'log': str(log_path),
         'count': len(rows),
         'columns': COLUMNS,
     }, ensure_ascii=False))
