@@ -150,6 +150,8 @@ def clean_text(text, summary=''):
     if not text:
         return ''
 
+    text = re.sub(r'!\[[^\]]*\]\([^\)]*\)', ' ', text)
+    text = re.sub(r'#:~:text=[^\s\)]*', '', text)
     text = re.sub(r'<script[\s\S]*?</script>', ' ', text, flags=re.I)
     text = re.sub(r'<style[\s\S]*?</style>', ' ', text, flags=re.I)
     text = re.sub(r'<noscript[\s\S]*?</noscript>', ' ', text, flags=re.I)
@@ -158,6 +160,14 @@ def clean_text(text, summary=''):
     text = re.sub(r'&[a-zA-Z]{2,10};', ' ', text)
     text = re.sub(r'&#\d+;', ' ', text)
     text = re.sub(r'&#x[0-9a-fA-F]+;', ' ', text)
+
+    cut_markers = ['您访问的链接将离开', '是否继续', '离开“', '离开本站', '门户网站']
+    for marker in cut_markers:
+        idx = text.find(marker)
+        if idx != -1:
+            text = text[:idx]
+            break
+
     text = re.sub(r'\s+', ' ', text)
 
     noise_patterns = [
@@ -195,6 +205,7 @@ def normalize_item(item, query, region):
     expected_year = expected_year_match.group(1) if expected_year_match else ''
 
     url = (item.get('url') or item.get('id') or '').strip()
+    url = re.sub(r'#.*$', '', url)
     exa_summary = (item.get('summary') or item.get('snippet') or '').strip()
     raw_text = (item.get('text') or item.get('content') or '').strip()
     text = clean_text(raw_text, exa_summary)
