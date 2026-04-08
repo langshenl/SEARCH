@@ -5,16 +5,8 @@ import re
 import sys
 import urllib.request
 import urllib.error
-import warnings
 from datetime import datetime
 from pathlib import Path
-
-try:
-    import requests
-    from bs4 import BeautifulSoup
-    REQUESTS_AVAILABLE = True
-except ImportError:
-    REQUESTS_AVAILABLE = False
 
 try:
     from openpyxl import Workbook
@@ -47,122 +39,6 @@ DATE_PATTERNS = [
 ]
 
 # URL validation: returns True if URL is accessible (not 404/4xx/5xx)
-# ─────────────────────────────────────────────
-# Plan A: Real-URL content fetcher (BeautifulSoup)
-# ─────────────────────────────────────────────
-
-def _extract_text_lines(elem):
-    """从元素中提取干净文本行，去导航碎片、相邻重复"""
-    lines = []
-    prev = ''
-    for e in elem.descendants:
-        if isinstance(e, str):
-            t = e.strip()
-            if not t or len(t) <= 6:
-                continue
-            if any(w in t for w in [
-                'copyright', '版权所有', 'cookie', '隐私政策', '网站地图',
-                '请您登录', '请登录', '无障碍', '长者专区', 'loading',
-                'ajax', 'javascript', 'jquery', '[', '【', '您的位置',
-                '上一页', '下一页', '更多', '网站支持',
-            ]):
-                continue
-            if t != prev:
-                lines.append(t)
-                prev = t
-    return lines
-
-
-def fetch_clean_content(url, title='', summary='', timeout=8):
-    """
-    从真实 URL 抓取并解析干净正文，三层兜底：
-    1. 找 <article> 或含"来源:"的元素
-    2. 找包含标题的段落周围正文
-    3. 找文本量最大的 div
-    失败返回 None
-    """
-    if not REQUESTS_AVAILABLE:
-        return None
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
-        }
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            r = requests.get(url, headers=headers, timeout=timeout)
-        r.encoding = r.apparent_encoding or 'utf-8'
-        soup = BeautifulSoup(r.text, 'html.parser')
-
-        # 去掉噪声标签
-        for tag in soup.find_all(['script','style','nav','header','footer','aside','noscript','iframe','svg']):
-            tag.decompose()
-
-        # ── 第一层：<article> ──
-        article = soup.find('article')
-        if article:
-            lines = _extract_text_lines(article)
-            if len(lines) > 3:
-                return '\n'.join(lines)
-
-        # ── 第一层：找含"来源:"的元素 ──
-        for elem in soup.find_all(string=lambda t: t and '来源' in t):
-            parent = elem.find_parent(['div', 'section', 'article', 'td'])
-            if not parent:
-                continue
-            for _ in range(6):
-                parent = parent.parent
-                if not parent or not parent.name:
-                    break
-                pclass = ' '.join(parent.get('class', [])).lower()
-                pid = (parent.get('id') or '').lower()
-                if any(k in pclass + pid for k in ['container', 'content', 'article', 'main', 'body', 'txt', 'text']):
-                    lines = _extract_text_lines(parent)
-                    if len(lines) > 3:
-                        return '\n'.join(lines)
-                    break
-
-        # ── 第二层：找包含标题的段落 ──
-        if title:
-            kw = title[:15].strip()
-            if kw:
-                for elem in soup.find_all(string=lambda t: t and kw in t):
-                    parent = elem.find_parent(['div', 'p', 'section'])
-                    if not parent:
-                        continue
-                    for _ in range(5):
-                        parent = parent.parent
-                        if parent and parent.name in ['div', 'section']:
-                            pclass = ' '.join(parent.get('class', [])).lower()
-                            pid = parent.get('id', '').lower()
-                            if 'container' in pclass or 'content' in pclass or 'article' in pid:
-                                lines = _extract_text_lines(parent)
-                                if len(lines) > 3:
-                                    return '\n'.join(lines)
-                                break
-
-        # ── 第三层：找最大文本块 ──
-        best_div, best_len = None, 0
-        for div in soup.find_all('div'):
-            div_class = ' '.join(div.get('class', [])).lower()
-            div_id = (div.get('id') or '').lower()
-            if any(k in div_class + div_id for k in ['nav', 'menu', 'sidebar', 'footer', 'header', 'tool', 'share', 'related', 'comment', 'logo', 'banner']):
-                continue
-            text = div.get_text(strip=True)
-            if len(text) > best_len:
-                best_len = len(text)
-                best_div = div
-        if best_div and best_len > 200:
-            lines = _extract_text_lines(best_div)
-            if len(lines) > 3:
-                return '\n'.join(lines)
-
-        return None
-    except Exception:
-        return None
-
-
 def is_url_valid(url, timeout=5):
     if not url or not url.startswith(('http://', 'https://')):
         return False
@@ -211,10 +87,9 @@ def infer_region(query, provided_region, text):
     return '全国'
 
 
-def clean_text_for_real(text, summary=''):
+def clean_text(text, summary=''):
     """
-    对已解析的干净文本做轻清洗：清理 HTML 实体、去除残余噪声碎片
-    （正文来自 fetch_clean_content，已经是 BeautifulSoup 解析后的干净文本）
+    对 Exa 返回的 text/content 做轻清洗：保留段落结构，去实体和残余噪声
     """
     if not text:
         return text
@@ -247,15 +122,8 @@ def normalize_item(item, query, region):
     title = (item.get('title') or '').strip()
     url = (item.get('url') or item.get('id') or '').strip()
     summary = (item.get('summary') or item.get('snippet') or '').strip()
-    # Plan A: 尝试从真实 URL 抓取干净正文
-    raw_text = None
-    if url:
-        raw_text = fetch_clean_content(url, title=title, summary=summary)
-    # 降级：使用 Exa 返回的原始 text
-    if not raw_text:
-        raw_text = (item.get('text') or item.get('content') or summary).strip()
-    # 对原始正文做轻清洗（保留段落结构）
-    text = clean_text_for_real(raw_text, summary)
+    raw_text = (item.get('text') or item.get('content') or summary).strip()
+    text = clean_text(raw_text, summary)
     org = first_match(ORG_PATTERNS, '\n'.join([title, summary, text]))
     publish_date = first_match(DATE_PATTERNS, '\n'.join([title, summary, text]))
     row_region = infer_region(query, region, '\n'.join([title, summary, text]))
