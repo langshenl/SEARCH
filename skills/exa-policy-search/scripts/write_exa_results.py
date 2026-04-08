@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import json
-import os
 import re
 import sys
 import urllib.request
@@ -16,7 +15,7 @@ except Exception:
     print('missing dependency: openpyxl', file=sys.stderr)
     sys.exit(2)
 
-COLUMNS = ["标题", "正文", "摘要", "发文机关", "发布时间", "原始链接", "关键词", "类型", "地区", "可信度"]
+COLUMNS = ["标题", "正文", "摘要", "发文机关", "发布时间", "原始链接", "关键词", "类型", "地区"]
 TYPE_RULES = [
     ('项目申报', ['申报', '申报指南', '申报条件']),
     ('发展规划', ['发展规划', '规划纲要', '规划']),
@@ -38,53 +37,23 @@ DATE_PATTERNS = [
     r"(20\d{2}-\d{2}-\d{2})",
 ]
 
-# URL validation: returns True if URL is accessible (not 404/4xx/5xx)
-def fetch_url_meta(url, timeout=5):
+
+def is_url_valid(url, timeout=5):
     if not url or not url.startswith(('http://', 'https://')):
-        return {'ok': False, 'status': None, 'final_url': '', 'title': ''}
+        return False
     try:
-        req = urllib.request.Request(url, method='GET')
+        req = urllib.request.Request(url, method='HEAD')
         req.add_header('User-Agent', 'Mozilla/5.0')
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            status = resp.getcode()
-            final_url = resp.geturl()
-            content = resp.read(120000).decode('utf-8', errors='ignore')
-            m = re.search(r'<title>(.*?)</title>', content, re.I | re.S)
-            title = re.sub(r'\s+', ' ', m.group(1)).strip() if m else ''
-            return {'ok': status < 400, 'status': status, 'final_url': final_url, 'title': title, 'content': content}
+            return resp.getcode() < 400
     except Exception:
-        return {'ok': False, 'status': None, 'final_url': '', 'title': '', 'content': ''}
-
-
-def score_confidence(result_title, summary, body, meta):
-    page_title = (meta.get('title', '') or '').lower()
-    final_url = (meta.get('final_url', '') or '').lower()
-    low_body = (body or '').lower()
-
-    # 404 / 错误页直接低可信
-    if (not meta.get('ok')) or any(k in page_title for k in ['404', 'not found', '错误', '出错']) or any(k in final_url for k in ['/404', 'error']):
-        return '低可信'
-
-    # 栏目页 / 首页 / 列表页：低可信
-    bad_page_signals = ['首页', '列表', '栏目', '频道', '当前位置', '欢迎访问', '网站首页']
-    if any(k in page_title for k in bad_page_signals):
-        return '低可信'
-
-    # 标题弱相似：命中任意核心词即可
-    title_hit = 0
-    for token in re.findall(r'[\u4e00-\u9fffA-Za-z0-9]{2,}', result_title)[:6]:
-        if token.lower() in page_title:
-            title_hit += 1
-
-    # 正文只看是否明显为空 / 明显不相关
-    if len((body or '').strip()) < 30:
-        return '低可信'
-
-    if title_hit >= 2:
-        return '高可信'
-    if title_hit >= 1:
-        return '中可信'
-    return '中可信'
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.getcode() < 400
+        except Exception:
+            return False
 
 
 def first_match(patterns, text):
@@ -115,33 +84,47 @@ def infer_region(query, provided_region, text):
 
 
 def clean_text(text, summary=''):
-    """
-    对 Exa 返回的 text/content 做轻清洗：保留段落结构，去实体和残余噪声
-    """
+    """加强正文清洗：去 script/style/html 噪音，保留可读文本"""
     if not text:
-        return text
-    # 清理 HTML 实体
+        return ''
+
+    text = re.sub(r'<script[\s\S]*?</script>', ' ', text, flags=re.I)
+    text = re.sub(r'<style[\s\S]*?</style>', ' ', text, flags=re.I)
+    text = re.sub(r'<noscript[\s\S]*?</noscript>', ' ', text, flags=re.I)
+    text = re.sub(r'<!--[\s\S]*?-->', ' ', text)
+    text = re.sub(r'<[^>]+>', ' ', text)
     text = re.sub(r'&[a-zA-Z]{2,10};', ' ', text)
     text = re.sub(r'&#\d+;', ' ', text)
     text = re.sub(r'&#x[0-9a-fA-F]+;', ' ', text)
-    # 去除残余噪声行
-    lines = text.split('\n')
+    text = re.sub(r'\s+', ' ', text)
+
+    noise_patterns = [
+        r'\bvar\s+\$?\w+\s*=.*?;',
+        r'\$\.ajax\(|jQuery\(|\$\(function',
+        r'https?://[^\s]{5,200}',
+        r'\bfunction\s*\w+\s*\([^)]*\)\s*\{',
+    ]
+    for p in noise_patterns:
+        text = re.sub(p, ' ', text, flags=re.I)
+
+    parts = re.split(r'(?<=[。！？；])\s*', text)
     cleaned = []
     seen = set()
-    for line in lines:
-        line = line.strip()
-        if len(line) < 6:
+    for part in parts:
+        part = part.strip()
+        if len(part) < 8:
             continue
-        if any(w in line.lower() for w in [
+        if any(w in part.lower() for w in [
             'copyright', '版权所有', 'cookie', '隐私政策', '网站地图',
             '请您登录', '请登录', '无障碍', '长者专区', 'loading',
-            'ajax', 'javascript', 'jquery',
+            'ajax', 'javascript', 'jquery', 'header 开始', 'header 结束',
+            'content 开始', '当前位置 开始', '当前位置 结束', '移动端菜单开始', '移动端菜单结束'
         ]):
             continue
-        key = line[:30].strip().lower()
+        key = part[:40].strip().lower()
         if key and key not in seen:
             seen.add(key)
-            cleaned.append(line)
+            cleaned.append(part)
     return '\n'.join(cleaned)
 
 
@@ -149,10 +132,8 @@ def normalize_item(item, query, region):
     title = (item.get('title') or '').strip()
     url = (item.get('url') or item.get('id') or '').strip()
     summary = (item.get('summary') or item.get('snippet') or '').strip()
-    raw_text = (item.get('text') or item.get('content') or summary).strip()
+    raw_text = (item.get('text') or item.get('content') or '').strip()
     text = clean_text(raw_text, summary)
-    meta = fetch_url_meta(url)
-    confidence = score_confidence(title, summary, text, meta)
     org = first_match(ORG_PATTERNS, '\n'.join([title, summary, text]))
     publish_date = first_match(DATE_PATTERNS, '\n'.join([title, summary, text]))
     row_region = infer_region(query, region, '\n'.join([title, summary, text]))
@@ -167,7 +148,6 @@ def normalize_item(item, query, region):
         '关键词': query,
         '类型': doc_type,
         '地区': row_region,
-        '可信度': confidence,
     }
 
 
@@ -186,8 +166,16 @@ def main():
     else:
         items = []
 
-    rows = [normalize_item(item, query, region) for item in items]
-    invalid_count = sum(1 for r in rows if r['可信度'] == '低可信')
+    valid_items = []
+    invalid_count = 0
+    for item in items:
+        url = (item.get('url') or item.get('id') or '').strip()
+        if url and is_url_valid(url):
+            valid_items.append(item)
+        else:
+            invalid_count += 1
+
+    rows = [normalize_item(item, query, region) for item in valid_items]
     safe = re.sub(r'[^\w\u4e00-\u9fff-]+', '_', query)[:60].strip('_') or 'exa-search'
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     out_dir = Path('~/Desktop/exa搜索文件夹').expanduser() / f'{safe}_{ts}'
@@ -198,7 +186,6 @@ def main():
     ws.title = '搜索结果'
     ws.append(COLUMNS)
 
-    # Header style
     header_font = Font(bold=True)
     header_fill = PatternFill(fill_type='solid', fgColor='D9E1F2')
     for col_idx, col_name in enumerate(COLUMNS, 1):
@@ -207,9 +194,7 @@ def main():
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-    # Data rows
-    url_col_idx = COLUMNS.index('原始链接') + 1
-    col_widths = {'标题': 30, '正文': 50, '摘要': 30, '发文机关': 20, '发布时间': 15, '原始链接': 35, '关键词': 20, '类型': 12, '地区': 12, '可信度': 12}
+    col_widths = {'标题': 30, '正文': 50, '摘要': 30, '发文机关': 20, '发布时间': 15, '原始链接': 35, '关键词': 20, '类型': 12, '地区': 12}
     for row_idx, row in enumerate(rows, 2):
         for col_idx, col_name in enumerate(COLUMNS, 1):
             cell = ws.cell(row=row_idx, column=col_idx)
@@ -224,12 +209,10 @@ def main():
                 cell.value = row[col_name]
         ws.row_dimensions[row_idx].height = 20
 
-    # Set column widths
     for col_idx, col_name in enumerate(COLUMNS, 1):
         col_letter = get_column_letter(col_idx)
         ws.column_dimensions[col_letter].width = col_widths.get(col_name, 15)
 
-    # Header row height
     ws.row_dimensions[1].height = 22
     xlsx_path = out_dir / '搜索结果.xlsx'
     wb.save(xlsx_path)
