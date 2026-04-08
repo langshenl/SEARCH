@@ -258,7 +258,7 @@ def normalize_item(item, query, region):
 
 
 def _summarize(rows, query):
-    """生成搜索结果摘要，用自然语言汇报"""
+    """生成学术风格的搜索结果摘要"""
     if not rows:
         return f"未找到与「{query}」相关的结果。"
 
@@ -269,45 +269,41 @@ def _summarize(rows, query):
     for r in rows:
         t = r.get('类型', '未知')
         type_count[t] = type_count.get(t, 0) + 1
-    top_types = sorted(type_count.items(), key=lambda x: -x[1])[:5]
-    type_str = '、'.join([f"{t}({c}条)" for t, c in top_types])
+    top_types = sorted(type_count.items(), key=lambda x: -x[1])[:6]
 
-    # 按年份统计（有发布时间的）
-    years = {}
-    for r in rows:
-        pd = r.get('发布时间', '')
-        if pd and len(pd) >= 4:
-            y = pd[:4]
-            years[y] = years.get(y, 0) + 1
-    year_str = '、'.join([f"{y}年({c}条)" for y, c in sorted(years.items(), reverse=True)]) if years else '时间信息不足'
+    # 合并所有正文和标题做主题分析
+    all_text = ' '.join([r.get('标题', '') + ' ' + r.get('正文', '') for r in rows])
 
-    # 标题关键词词云（统计高频词）
-    word_count = {}
-    stopwords = {'的', '了', '和', '在', '对', '为', '以及', '等', '或', '与', '关于', '关于', '转发', '通知', '工作', '活动', '发布', '开展', '进行'}
-    for r in rows:
-        for w in re.findall(r'[\u4e00-\u9fff]{2,}', r.get('标题', '')):
-            if w not in stopwords and len(w) >= 2:
-                word_count[w] = word_count.get(w, 0) + 1
-    top_words = sorted(word_count.items(), key=lambda x: -x[1])[:8]
-    word_str = '、'.join([f"{w}" for w, c in top_words]) if top_words else ''
-
-    # 正文长度分布
-    body_lens = [len(r.get('正文', '')) for r in rows]
-    avg_len = sum(body_lens) // total if total else 0
-    rich = sum(1 for l in body_lens if l >= 1000)
-    sparse = sum(1 for l in body_lens if l < 200)
+    # 推断政策主题（按关键词命中）
+    themes = []
+    theme_hits = {
+        '新能源开发与利用': ['新能源', '光伏', '风电', '储能', '充电桩', '氢能', '生物质能'],
+        '财政扶持与价格机制': ['电价', '补贴', '财政', '奖补', '预算', '资金', '税收', '优惠'],
+        '项目建设与产业布局': ['项目', '建设', '投资', '产业', '园区', '基地', '集群'],
+        '新能源汽车推广': ['新能源汽车', '电动汽车', '充电设施', '汽车下乡', '绿车'],
+        '节能降碳与绿色发展': ['节能', '降碳', '碳达峰', '碳中和', '绿色', '排放', '减排'],
+        '发展规划与实施方案': ['规划', '方案', '意见', '计划', '纲要', '要点'],
+        '资源交易与市场机制': ['交易', '招标', '投标', '采购', '竞价', '市场'],
+    }
+    for theme, kws in theme_hits.items():
+        if sum(1 for kw in kws if kw in all_text) >= 2:
+            themes.append(theme)
+    theme_str = '、'.join(themes[:4]) if themes else '综合性政策'
 
     lines = [
-        f"本次搜索「{query}」，共筛选出 **{total} 条**结果，汇总如下：",
+        f"本次检索共获得 {total} 项政策文件，涵盖以下主题：",
         f"",
-        f"📋 类型分布：{type_str}",
-        f"📅 时间分布：{year_str}",
-        f"📝 正文字数：平均 {avg_len} 字/篇，其中正文较丰富（≥1000字）{rich} 篇、正文较短（<200字）{sparse} 篇",
+        f"【内容主题】{theme_str}",
+        f"",
+        f"【文件类型】",
     ]
-    if word_str:
-        lines.append(f"🔍 标题高频词：{word_str}")
+    for t, c in top_types:
+        pct = c / total * 100
+        lines.append(f"  · {t}：{c}项（{pct:.0f}%）")
+
     lines.append(f"")
-    lines.append(f"📁 详细数据已保存至桌面 exa搜索文件夹。")
+    lines.append(f"【研究说明】上述文件主要围绕{themes[0] if themes else '政策体系建设'}等议题展开，从顶层规划、财政支持、项目实施等多维度呈现地方政策动态。")
+
     return '\n'.join(lines)
 
 
