@@ -87,8 +87,12 @@ def is_url_valid(url, timeout=5):
             code = resp.getcode()
             if code in (404, 410):
                 return False
-            content = resp.read(20000).decode('utf-8', errors='ignore').lower()
-            if any(k in content for k in ['404 not found', '页面不存在', '您访问的页面不存在', 'not found']):
+            content = resp.read(100000).decode('utf-8', errors='ignore')
+            low = content.lower()
+            title_match = re.search(r'<title>(.*?)</title>', content, re.I | re.S)
+            page_title = title_match.group(1).strip().lower() if title_match else ''
+            error_signals = ['404 not found', '页面不存在', '您访问的页面不存在', 'not found', '内容不存在', '信息不存在', '已删除', '已失效']
+            if any(k in low for k in error_signals) or any(k in page_title for k in error_signals):
                 return False
             return True
     except urllib.error.HTTPError as e:
