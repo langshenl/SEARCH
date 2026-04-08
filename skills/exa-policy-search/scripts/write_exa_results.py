@@ -39,21 +39,26 @@ DATE_PATTERNS = [
 
 
 def is_url_valid(url, timeout=5):
+    """弱校验：只拦明显死链，尽量避免误杀政府站链接"""
     if not url or not url.startswith(('http://', 'https://')):
         return False
     try:
-        req = urllib.request.Request(url, method='HEAD')
+        req = urllib.request.Request(url)
         req.add_header('User-Agent', 'Mozilla/5.0')
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.getcode() < 400
-    except Exception:
-        try:
-            req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'Mozilla/5.0')
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.getcode() < 400
-        except Exception:
+            code = resp.getcode()
+            if code in (404, 410):
+                return False
+            content = resp.read(20000).decode('utf-8', errors='ignore').lower()
+            if any(k in content for k in ['404 not found', '页面不存在', '您访问的页面不存在', 'not found']):
+                return False
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code in (404, 410):
             return False
+        return True
+    except Exception:
+        return True
 
 
 def first_match(patterns, text):
