@@ -87,42 +87,123 @@ def infer_region(query, provided_region, text):
     return '全国'
 
 
+def strip_html(html):
+    """用 html.parser 深度清理 HTML，移除 script/style/nav/footer 等噪声块"""
+    if not html:
+        return ''
+    try:
+        from html.parser import HTMLParser
+    except ImportError:
+        return html
+
+    class ContentExtractor(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.result = []
+            self.skip_depth = 0  # 0=正常收集, >0=跳过
+            self.skip_tags = {'script', 'style', 'noscript', 'iframe', 'svg', 'math'}
+            self.current_tag = ''
+            self._in_body = False
+
+        def handle_starttag(self, tag, attrs):
+            self.current_tag = tag
+            if tag in self.skip_tags:
+                self.skip_depth += 1
+
+        def handle_endtag(self, tag):
+            if tag in self.skip_tags and self.skip_depth > 0:
+                self.skip_depth -= 1
+            if tag == 'body':
+                self._in_body = False
+            self.current_tag = ''
+
+        def handle_data(self, data):
+            if self.skip_depth > 0:
+                return
+            stripped = data.strip()
+            if not stripped:
+                return
+            # 过滤 JS/CSS 残片
+            if self._is_noise(stripped):
+                return
+            self.result.append(stripped)
+
+        def _is_noise(self, text):
+            # 导航类
+            if re.match(r'^\[.*\]$', text):  # [首页] > [政务公开]
+                return True
+            if re.match(r'^\s*>>?\s*$', text):  # 导航箭头
+                return True
+            # JS代码残片
+            if re.search(r'\.ajax\(|\$\(|jQuery\(|handleClick|onclick=|onerror=', text, re.I):
+                return True
+            # URL残片
+            if re.match(r'https?://[^\s]+$', text) and len(text) < 200:
+                return True
+            # 纯短英文/数字行
+            if re.match(r'^[a-zA-Z]{1,30}([.][a-zA-Z]{1,10})?$', text) and len(text) < 40:
+                return True
+            if re.match(r'^\d+$', text):
+                return True
+            return False
+
+        def get_text(self):
+            return '\n'.join(self.result)
+
+    try:
+        # 预处理：去掉已知噪声块
+        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.I)
+        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.I)
+        html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
+        html = re.sub(r'<noscript[^>]*>.*?</noscript>', '', html, flags=re.DOTALL | re.I)
+
+        parser = ContentExtractor()
+        parser.feed(html)
+        return parser.get_text()
+    except Exception:
+        return html
+
+
 def clean_text(text, summary=''):
-    """清洗正文：去噪、去重复句子、清理HTML残留"""
+    """深度清洗正文：HTML解析 + 噪声去除 + 去重"""
     if not text:
         return text
-    # 去除HTML标签残留
-    text = re.sub(r'<[^>]{1,50}>', '', text)
-    text = re.sub(r'&[a-zA-Z]{1,10};', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    lines = text.split('。')
-    # 去除重复句子（与摘要相同的句子在正文中去除）
-    if summary:
-        summary_short = summary[:50]  # 取摘要前50字
-        lines = [l for l in lines if summary_short not in l][:50]
-    else:
-        lines = lines[:50]
-    # 去除噪声行（广告、导航、版权声明等短句）
-    noise_patterns = [
-        r'^\s*\d+$',  # 纯数字行
-        r'^\s*[一二三四五六七八九十]{1,3}\s*$',  # 纯序号行
-        r'^\s*(版权所有|copyright|转载|来源|声明|技术支持|网站地图|联系我们|登录|注册)\s*$',
-        r'^\s*[(（]?[a-zA-Z]{3,20}[)）]?\s*$',  # 纯英文词
-        r'^\s*[|\-－_]{3,}\s*$',  # 分隔线
-    ]
-    cleaned_lines = []
-    for line in lines:
-        line = line.strip()
-        if len(line) < 8:  # 少于8字的行跳过
+
+    # 第一步：用 html.parser 清理 HTML 结构和 JS/CSS 残片
+    text = strip_html(text)
+
+    # 第二步：通用 HTML 实体清理
+    text = re.sub(r'&[a-zA-Z]{2,10};', ' ', text)  # &nbsp; &gt; &lt; 等
+    text = re.sub(r'&#\d+;', ' ', text)           # &#123; 等
+
+    # 第三步：按段落分割，去除重复段落和噪声
+    paragraphs = re.split(r'[\n\r]+', text)
+    seen = set()
+    cleaned = []
+
+    for para in paragraphs:
+        para = para.strip()
+        if not para or len(para) < 6:
             continue
-        is_noise = False
-        for pattern in noise_patterns:
-            if re.search(pattern, line, re.IGNORECASE):
-                is_noise = True
-                break
-        if not is_noise:
-            cleaned_lines.append(line)
-    return '。'.join(cleaned_lines)
+        # 跳过含显著噪声关键词的段落
+        noise_words = ['copyright', '版权所有', 'cookie', '隐私政策', '网站地图',
+                       '请您登录', '请登录', '立即登录', '用户登录', '注册账号',
+                       'loading', 'loading...', '加载中', '无障碍', '长者专区',
+                       'jquery', 'javascript', 'ajax', 'document.cookie']
+        if any(w in para.lower() for w in noise_words):
+            continue
+        # 摘要去重（与摘要前60字相同的段落跳过）
+        if summary:
+            summary_key = summary[:60].strip().lower()
+            if summary_key and summary_key in para.lower():
+                continue
+        # 段落去重
+        para_key = para[:40].strip().lower()
+        if para_key and para_key not in seen:
+            seen.add(para_key)
+            cleaned.append(para)
+
+    return '\n'.join(cleaned)
 
 
 def normalize_item(item, query, region):
