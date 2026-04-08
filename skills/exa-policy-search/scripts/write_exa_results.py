@@ -3,6 +3,8 @@ import json
 import os
 import re
 import sys
+import urllib.request
+import urllib.error
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +26,27 @@ DATE_PATTERNS = [
     r"(20\d{2}年\d{1,2}月\d{1,2}日)",
     r"(20\d{2}-\d{2}-\d{2})",
 ]
+
+# URL validation: returns True if URL is accessible (not 404/4xx/5xx)
+def is_url_valid(url, timeout=5):
+    if not url or not url.startswith(('http://', 'https://')):
+        return False
+    try:
+        req = urllib.request.Request(url, method='HEAD')
+        req.add_header('User-Agent', 'Mozilla/5.0')
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = resp.getcode()
+            return status < 400
+    except Exception:
+        # Fallback: try GET request
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status = resp.getcode()
+                return status < 400
+        except Exception:
+            return False
 
 
 def first_match(patterns, text):
@@ -92,7 +115,17 @@ def main():
     else:
         items = []
 
-    rows = [normalize_item(item, query, region) for item in items]
+    # Validate URLs and filter out invalid ones
+    valid_items = []
+    invalid_count = 0
+    for item in items:
+        url = (item.get('url') or item.get('id') or '').strip()
+        if url and is_url_valid(url):
+            valid_items.append(item)
+        else:
+            invalid_count += 1
+
+    rows = [normalize_item(item, query, region) for item in valid_items]
     safe = re.sub(r'[^\w\u4e00-\u9fff-]+', '_', query)[:60].strip('_') or 'exa-search'
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     out_dir = Path('~/Desktop/exa搜索文件夹').expanduser() / f'{safe}_{ts}'
@@ -143,6 +176,7 @@ def main():
         'output_dir': str(out_dir),
         'excel': str(xlsx_path),
         'count': len(rows),
+        'invalid_count': invalid_count,
         'columns': COLUMNS,
     }, ensure_ascii=False))
 
