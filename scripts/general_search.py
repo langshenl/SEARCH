@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 通用网页搜索工具：对任意网站执行关键词搜索，抓取第1页结果
-模式1（默认）：生成Word文档
-模式2（--analyze）：流式输出+每篇摘要，AI直接分析
+模式1（默认）：流式输出+正文片段（供AI总结）
+模式2（doc）：生成Word文档
 
 用法:
-  python3 general_search.py <搜索URL> <关键词> [输出目录] [链接选择器] [正文选择器] [analyze]
+  python3 general_search.py <搜索URL> <关键词> [输出目录] [链接选择器] [正文选择器] [数量|doc]
 """
+import socket
 import subprocess
 import json
 import time
@@ -18,12 +19,14 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from concurrent.futures import ThreadPoolExecutor
 
 CDP = "http://localhost:3456"
-CONCURRENCY = 10
+CONCURRENCY = 5
 MAX_WAIT_READY = 3
+DEFAULT_MAX_RETRIES = 2
 
-DEFAULT_LINK_SELECTORS = '.news-list .item-title a, .search-result a'
+DEFAULT_LINK_SELECTORS = 'li.b_algo h2 a, h3 a, .result h3 a'
 DEFAULT_BODY_SELECTORS = 'TRS_Editor|bt-article|article-content|content|article|main|body'
 
 # 全局记录已打开的tab，用于异常时清理
@@ -41,11 +44,8 @@ def normalize_url(url):
     # 百度跳转链接解码
     if 'baidu.com/link?url=' in url:
         try:
-            # url=后面的部分是编码后的真实URL
             encoded = url.split('baidu.com/link?url=')[1].split('&')[0]
-            # 尝试解码
             decoded = urllib.parse.unquote(encoded)
-            # 验证是否是有效URL
             if decoded.startswith('http'):
                 return decoded
         except Exception:
@@ -82,14 +82,29 @@ def cdp_new(url):
     """创建新tab，返回targetId"""
     global _open_tabs
     try:
+        # 先创建空白tab
         resp = subprocess.run(
-            ['curl', '-s', f'{CDP}/new?url={url}'],
+            ['curl', '-s', f'{CDP}/new'],
             capture_output=True, text=True, timeout=25
         )
         result = json.loads(resp.stdout.strip())
         target_id = result.get('targetId', '')
-        if target_id:
-            _open_tabs.append(target_id)
+        if not target_id:
+            return ''
+        _open_tabs.append(target_id)
+        
+        # 等待 tab 就绪
+        wait_until_ready(target_id, timeout=5)
+        
+        # 再导航到目标URL（先解码再重新正确编码，避免双重编码）
+        decoded_url = urllib.parse.unquote(url)
+        encoded_url = urllib.parse.quote(decoded_url, safe='/:?=&')
+        subprocess.run(
+            ['curl', '-s', '-X', 'POST', f'{CDP}/navigate?target={target_id}&url={encoded_url}'],
+            capture_output=True, text=True, timeout=30
+        )
+        # 等待页面加载
+        time.sleep(6)
         return target_id
     except Exception as e:
         print(f"    ⚠️ cdp_new失败: {e}", flush=True)
@@ -127,24 +142,34 @@ def cdp_eval(target_id, script, timeout=35):
 
 
 def cdp_close(target_id):
-    """关闭tab"""
+    """关闭tab（快速失败，不阻塞）"""
     global _open_tabs
     try:
-        subprocess.run(['curl', '-s', f'{CDP}/close?target={target_id}'], timeout=10)
+        # 使用短timeout，避免在清理时卡住
+        subprocess.run(['curl', '-s', f'{CDP}/close?target={target_id}'], timeout=3)
         if target_id in _open_tabs:
             _open_tabs.remove(target_id)
-    except Exception as e:
-        print(f"    ⚠️ cdp_close失败: {e}", flush=True)
+    except Exception:
+        # 清理失败时直接移除记录，避免残留
+        if target_id in _open_tabs:
+            _open_tabs.remove(target_id)
 
 
 def cleanup_all_tabs():
-    """强制清理所有已打开的tab（异常保护）"""
+    """强制清理所有已打开的tab（异常保护，快速失败）"""
     global _open_tabs
     if _open_tabs:
-        print(f"\n🧹 清理 {len(_open_tabs)} 个残留tab...", flush=True)
-        for tid in _open_tabs[:]:
-            cdp_close(tid)
+        tabs_to_close = _open_tabs[:]
         _open_tabs.clear()
+        # fire-and-forget 方式关闭所有tab
+        for tid in tabs_to_close:
+            try:
+                subprocess.run(
+                    ['curl', '-s', f'{CDP}/close?target={tid}'],
+                    timeout=2
+                )
+            except Exception:
+                pass
 
 
 def wait_until_ready(target_id, timeout=3):
@@ -186,18 +211,26 @@ def clean_text(text):
 
 
 def extract_links(target_id, link_selectors):
-    """从搜索结果页提取链接"""
+    """从搜索结果页提取链接，遍历所有选择器并合并去重"""
     selectors = [s.strip() for s in link_selectors.split(',')]
-    first_sel = selectors[0].replace("'", "\\'")
-    script = f"""var r=[];document.querySelectorAll('{first_sel}').forEach(function(a){{if(a.href)r.push({{text:a.textContent.replace(/<[^>]+>/g,'').trim(),href:a.href}})}});JSON.stringify(r)"""
-    result = cdp_eval(target_id, script)
-    if result:
-        try:
-            return json.loads(result)
-        except Exception as e:
-            print(f"    ⚠️ 链接提取失败: {e}", flush=True)
-            return []
-    return []
+    all_links = []
+    seen = set()
+
+    for sel in selectors:
+        escaped_sel = sel.replace("'", "\\'")
+        script = f"""var r=[];document.querySelectorAll('{escaped_sel}').forEach(function(a){{if(a.href)r.push({{text:a.textContent.replace(/<[^>]+>/g,'').trim(),href:a.href}})}});JSON.stringify(r)"""
+        result = cdp_eval(target_id, script)
+        if result:
+            try:
+                links = json.loads(result)
+                for link in links:
+                    # href去重（同选择器内可能重复）
+                    if link['href'] not in seen:
+                        seen.add(link['href'])
+                        all_links.append(link)
+            except Exception as e:
+                print(f"    ⚠️ 选择器 '{sel}' 解析失败: {e}", flush=True)
+    return all_links
 
 
 def extract_article_text_fast(target_id, body_selectors_raw):
@@ -250,12 +283,15 @@ def extract_article_text_fast(target_id, body_selectors_raw):
 
 
 def generate_summary(title, text, max_chars=3000):
-    """生成文章摘要 - 取中间段落避免噪音"""
+    """生成文章摘要 - 取中间段落避免噪音
+    注意：此函数为算法摘要，不调用LLM。
+    AI总结由主agent在拿到正文后自行调用模型生成。
+    """
     content = text[:max_chars] if len(text) > max_chars else text
     lines = [l.strip() for l in content.split('\n') if len(l.strip()) > 15]
 
     if not lines:
-        return "（摘要提取失败，正文过短）"
+        return "（正文过短，无法提取摘要）"
 
     # 过滤短句（导航栏噪音）
     content_lines = [l for l in lines if len(l) >= 30]
@@ -280,41 +316,94 @@ def generate_summary(title, text, max_chars=3000):
     return summary
 
 
-def crawl_and_display(urls, body_selectors, concurrency=10):
+def cdp_new_blank():
+    """仅创建空白tab，返回targetId（不导航、不等待）"""
+    global _open_tabs
+    try:
+        resp = subprocess.run(
+            ['curl', '-s', f'{CDP}/new'],
+            capture_output=True, text=True, timeout=25
+        )
+        result = json.loads(resp.stdout.strip())
+        target_id = result.get('targetId', '')
+        if target_id:
+            _open_tabs.append(target_id)
+        return target_id
+    except:
+        return ''
+
+
+def cdp_nav(target_id, url):
+    """导航到URL（不等待页面加载）"""
+    try:
+        decoded_url = urllib.parse.unquote(url)
+        encoded_url = urllib.parse.quote(decoded_url, safe='/:?=&')
+        subprocess.run(
+            ['curl', '-s', '-X', 'POST', f'{CDP}/navigate?target={target_id}&url={encoded_url}'],
+            capture_output=True, text=True, timeout=30
+        )
+    except:
+        pass
+
+
+def crawl_and_display(urls, body_selectors, concurrency=5, max_retries=2):
     """
     流式爬取：每篇完成立即显示，支持摘要生成
-    确保异常时也能清理已打开的tab
+    批量并行创建tab/导航/等待，真正并发
     """
     total = len(urls)
-    completed = 0
-    failed_urls = []  # 记录失败URL便于调试
+    failed_urls = []
+    retry_count = {url: 0 for url in urls}
+    pending = list(urls)
+    processed_urls = set()
 
     try:
-        for batch_start in range(0, total, concurrency):
-            batch = urls[batch_start:batch_start + concurrency]
-            batch_num = batch_start // concurrency + 1
+        while pending:
+            batch = pending[:concurrency]
+            batch_num = (total - len(pending)) // concurrency + 1
             total_batches = (total + concurrency - 1) // concurrency
 
             print(f"\n📦 批次 {batch_num}/{total_batches} 正在处理...", flush=True)
 
-            # 批量创建tab
-            targets = [cdp_new(url) for url in batch]
+            # Phase 1: 批量并行创建空白tab
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                blank_futures = [executor.submit(cdp_new_blank) for _ in batch]
+                targets = [f.result() if f.result() else '' for f in blank_futures]
 
-            # 等待所有tab加载
-            for t in targets:
+            # Phase 2: 批量并行发起导航（不等待加载）
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                nav_futures = [executor.submit(cdp_nav, t, u) for t, u in zip(targets, batch) if t]
+                for f in nav_futures:
+                    f.result()  # 等待导航请求发出
+
+            # Phase 3: 批量等待所有tab加载完成
+            def wait_one(t):
                 if t:
                     wait_until_ready(t, timeout=MAX_WAIT_READY)
+                return t
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                ready_futures = [executor.submit(wait_one, t) for t in targets]
+                targets = [f.result() for f in ready_futures]
+
+            # 重置本轮已处理记录
+            processed_urls.clear()
 
             # 逐个提取并实时显示
             for i, (url, t) in enumerate(zip(batch, targets)):
+                idx = total - len(pending) + i + 1
+
                 if not t:
-                    completed += 1
-                    failed_urls.append((url, '无法创建tab'))
-                    print(f"    ⏭️  [{completed}/{total}] 跳过（无法打开）", flush=True)
-                    yield None
+                    rc = retry_count.get(url, 0)
+                    if rc < max_retries:
+                        print(f"    🔄 [{idx}/{total}] 重试({rc+1}/{max_retries}) - 无法打开tab", flush=True)
+                        pending.append(url)
+                        retry_count[url] = rc + 1
+                    else:
+                        failed_urls.append((url, '无法创建tab'))
+                        print(f"    ⏭️  [{idx}/{total}] 跳过（无法打开）", flush=True)
+                        processed_urls.add(url)
                     continue
 
-                idx = batch_start + i + 1
                 try:
                     data = extract_article_text_fast(t, body_selectors)
                     text = data.get('text', '') if data else ''
@@ -334,21 +423,32 @@ def crawl_and_display(urls, body_selectors, concurrency=10):
                         'summary': summary,
                         'char_count': len(text)
                     }
-                    print(f"    ✅ [{completed+1}/{total}] {selector_used[:15]:<15} {len(text):>5}字", flush=True)
-                    completed += 1
+                    print(f"    ✅ [{len(processed_urls)+1}/{total}] {selector_used[:15]:<15} {len(text):>5}字", flush=True)
+                    processed_urls.add(url)
                     yield result
                 else:
-                    failed_urls.append((url, '内容为空或太短'))
-                    print(f"    ❌ [{completed+1}/{total}] 内容为空或太短", flush=True)
-                    completed += 1
-                    yield None
+                    rc = retry_count.get(url, 0)
+                    if rc < max_retries:
+                        print(f"    🔄 [{idx}/{total}] 重试({rc+1}/{max_retries}) - 内容太短", flush=True)
+                        pending.append(url)
+                        retry_count[url] = rc + 1
+                    else:
+                        failed_urls.append((url, '内容为空或太短'))
+                        print(f"    ❌ [{idx}/{total}] 内容为空或太短（已重试{max_retries}次）", flush=True)
+                        processed_urls.add(url)
+                        yield None
+
+            # 只移除真正处理完的URL（排除重试入队的）
+            for url in batch:
+                if url in processed_urls and url in pending:
+                    pending.remove(url)
 
     finally:
         # 确保批次结束后清理所有tab
         pass
 
     # 报告统计
-    success = completed - len(failed_urls)
+    success = total - len(failed_urls)
     print(f"\n🎉 抓取完成！成功 {success}/{total} 篇", flush=True)
     if failed_urls:
         print(f"   失败 {len(failed_urls)} 条:", flush=True)
@@ -475,6 +575,12 @@ def stream_analyze_output(search_url_template, keyword, link_selectors=None, bod
         if dedup_count > 0:
             print(f"   🔄 去重后 {len(links)} 条（去除重复 {dedup_count} 条）", flush=True)
 
+        # 限制处理数量
+        max_articles = getattr(sys, 'max_articles', 0) or len(links)
+        if max_articles > 0 and max_articles < len(links):
+            links = links[:max_articles]
+            print(f"   📌 限制处理前 {max_articles} 条", flush=True)
+
         # 打印链接预览
         print(f"\n   链接预览（前10条）:", flush=True)
         for i, l in enumerate(links[:10]):
@@ -490,7 +596,7 @@ def stream_analyze_output(search_url_template, keyword, link_selectors=None, bod
         urls = [l['href'] for l in links]
         all_results = {}
 
-        for result in crawl_and_display(urls, body_selectors, concurrency=CONCURRENCY):
+        for result in crawl_and_display(urls, body_selectors, concurrency=CONCURRENCY, max_retries=DEFAULT_MAX_RETRIES):
             if result:
                 all_results[result['url']] = {
                     'text': result['text'],
@@ -535,8 +641,31 @@ def stream_analyze_output(search_url_template, keyword, link_selectors=None, bod
         cleanup_all_tabs()
 
 
-def main(search_url_template, keyword, output_dir=None, link_selectors=None, body_selectors=None, mode='doc'):
+def ensure_chrome(port=9222):
+    """确保Chrome以调试端口启动，自动检测并启动"""
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = sock.connect_ex(('127.0.0.1', port))
+    sock.close()
+    if result == 0:
+        return  # Chrome已运行
+    # 未运行，直接启动Chrome可执行文件（更可靠）
+    print("    🔄 Chrome 未启动，正在启动...", flush=True)
+    subprocess.Popen(
+        ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+         f'--remote-debugging-port={port}',
+         '--no-first-run', '--no-default-browser-check',
+         '--user-data-dir=/tmp/chrome-debug'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    time.sleep(4)
+    print("    ✅ Chrome 已启动", flush=True)
+
+
+def main(search_url_template, keyword, output_dir=None, link_selectors=None, body_selectors=None, mode='analyze'):
     global _open_tabs
+
+    ensure_chrome()  # 自动检测并启动Chrome
 
     if mode == 'analyze':
         return stream_analyze_output(search_url_template, keyword, link_selectors, body_selectors)
@@ -577,6 +706,12 @@ def main(search_url_template, keyword, output_dir=None, link_selectors=None, bod
         links = dedup_links(links)
         print(f"  共提取到 {len(links)} 条链接（去重后）")
 
+        # 限制处理数量
+        max_articles = getattr(sys, 'max_articles', 0) or len(links)
+        if max_articles > 0 and max_articles < len(links):
+            links = links[:max_articles]
+            print(f"  限制处理前 {max_articles} 条")
+
         for i, l in enumerate(links):
             print(f"  {i+1:3d}. {l['text'][:50]}")
 
@@ -584,7 +719,7 @@ def main(search_url_template, keyword, output_dir=None, link_selectors=None, bod
         urls = [l['href'] for l in links]
 
         results = {}
-        for result in crawl_and_display(urls, body_selectors, concurrency=CONCURRENCY):
+        for result in crawl_and_display(urls, body_selectors, concurrency=CONCURRENCY, max_retries=DEFAULT_MAX_RETRIES):
             if result:
                 results[result['url']] = {
                     'text': result['text'],
@@ -620,19 +755,20 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, signal_handler)
 
     if len(sys.argv) < 3:
-        print("用法: python3 general_search.py <搜索URL> <关键词> [输出目录] [链接选择器] [正文选择器] [analyze]")
+        print("用法: python3 general_search.py <搜索URL> <关键词> [输出目录] [链接选择器] [正文选择器] [数量|doc]")
         print("")
         print("参数说明:")
         print("  搜索URL     : 搜索页URL，{keyword} 或 {kw} 占位符会被关键词替换")
         print("  关键词       : 要搜索的关键词")
-        print("  输出目录     :（可选）文档输出路径，默认 ~/Desktop/<关键词>搜索结果")
-        print("  链接选择器  :（可选）CSS选择器提取搜索结果链接")
+        print("  输出目录     :（可选）文档输出路径，默认 ~/Desktop")
+        print("  链接选择器  :（可选）CSS选择器提取搜索结果链接，支持逗号分隔多选择器")
         print("  正文选择器  :（可选）|分隔的CSS选择器列表")
-        print("  analyze     :（可选）流式输出+摘要模式，AI分析专用")
+        print("  数量|doc    :（可选）数字=抓取条数（默认5），doc=生成Word文档")
         print("")
         print("示例:")
         print('  python3 general_search.py "https://www.baidu.com/s?wd={keyword}" "人工智能"')
-        print('  python3 general_search.py "https://www.baidu.com/s?wd={keyword}" "人工智能" ~/Desktop analyze')
+        print('  python3 general_search.py "https://www.baidu.com/s?wd={keyword}" "关键词" ~/Desktop "" "" 10')
+        print('  python3 general_search.py "https://www.baidu.com/s?wd={keyword}" "关键词" ~/Desktop "" "" doc')
         sys.exit(1)
 
     search_url = sys.argv[1]
@@ -640,6 +776,7 @@ if __name__ == '__main__':
     output_dir = sys.argv[3] if len(sys.argv) > 3 else None
     link_selectors = sys.argv[4] if len(sys.argv) > 4 else None
     body_selectors = sys.argv[5] if len(sys.argv) > 5 else None
-    mode = sys.argv[6] if len(sys.argv) > 6 else 'doc'
+    mode = sys.argv[6] if len(sys.argv) > 6 else 'analyze'
+    sys.max_articles = int(sys.argv[7]) if len(sys.argv) > 7 and sys.argv[7].isdigit() else 5
 
     main(search_url, keyword, output_dir, link_selectors, body_selectors, mode)
