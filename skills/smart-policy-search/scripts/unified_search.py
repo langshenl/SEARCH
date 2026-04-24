@@ -1074,15 +1074,7 @@ def auto_decide_source(query):
         # 无部门匹配 → Exa兜底
         return "exa", [], [], query
 
-    # 2. 日常问题 → CDP爬百度
-    life_keywords = ["怎么", "如何", "怎么办", "是什么", "为什么",
-                     "哪里", "哪个", "好不好", "怎么样", "多少",
-                     "介绍一下", "解释一下", "说一说", "讲讲",
-                     "限行", "能不能", "可以吗", "怎么走"]
-    if any(kw in query for kw in life_keywords):
-        return "cdp_baidu", [], [], query
-
-    # 3. 检测省份
+    # 2. 检测省份
     detected_provinces = []
     for p in PROVINCE_KEYWORDS:
         if p in query:
@@ -1096,12 +1088,12 @@ def auto_decide_source(query):
     if has_provinces and any(kw in query for kw in policy_keywords):
         return "exa", [], detected_provinces, extract_search_keyword(query)
 
-    # 5. 有省份但非政策类 → Exa（site:省.gov.cn，失败→CDP百度降级）
+    # 4. 有省份但非政策类 → Exa（site:省.gov.cn）
     if has_provinces:
         return "exa", [], detected_provinces, extract_search_keyword(query)
 
-    # 6. 默认 → CDP百度（失败→Exa全网降级）
-    return "cdp_baidu", [], [], query
+    # 5. 默认 → Exa全网搜索
+    return "exa", [], [], query
 
 
 def unified_search(query, source="auto", output_dir=None, max_results=30):
@@ -1178,44 +1170,6 @@ def unified_search(query, source="auto", output_dir=None, max_results=30):
             with ThreadPoolExecutor(max_workers=len(dept_names)) as executor:
                 results = list(executor.map(_search_dept, dept_names))
             excel_paths.extend([p for p in results if p])
-
-        elif source_mode == "cdp_baidu":
-            if provinces:
-                # 多省：每省先 CDP百度，失败再 Exa 降级
-                print(f"[多省搜索] 共 {len(provinces)} 个省份: {provinces}")
-                for prov in provinces:
-                    baidu_kw = f"{prov} {search_kw}"
-                    print(f"\n  → {prov}: {baidu_kw}")
-                    ok = cdp_baidu_search(baidu_kw, max_results=10)
-                    if not ok:
-                        print(f"    {prov} CDP百度失败，Exa降级...")
-                        result = exa_search(search_kw, prov, output_dir)
-                        if result:
-                            rows, excel_path = result
-                            if rows:
-                                print(f"    Exa降级成功，获取到 {len(rows)} 条结果")
-                            if excel_path:
-                                excel_paths.append(excel_path)
-            else:
-                # 无省份：先 CDP百度，失败 Exa 全网
-                ok = cdp_baidu_search(search_kw, max_results=10)
-                if not ok:
-                    print("CDP百度搜索失败，切换到Exa API保底...")
-                    result = exa_search(search_kw, None, output_dir)
-                    if result:
-                        rows, excel_path = result
-                        if rows:
-                            print(f"Exa降级成功，获取到 {len(rows)} 条结果")
-                            print(f"\n{'='*60}")
-                            print("【总结分析】")
-                            print(f"{'='*60}")
-                            print(f"针对您的问题「{search_kw}」，搜索到 {len(rows)} 条参考信息：\n")
-                            for i, r in enumerate(rows[:5], 1):
-                                title = r.get('标题', '无标题')[:60]
-                                print(f"{i}. {title}")
-                            if rows[0].get('摘要'):
-                                print(f"\n【参考】")
-                                print(f"{rows[0]['摘要'][:300]}...")
 
         elif source_mode == "exa":
             if provinces:
