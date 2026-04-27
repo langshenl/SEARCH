@@ -1,0 +1,12 @@
+{
+  "name": "湖北省政府",
+  "domain": "hubei.gov.cn",
+  "content_start": "<div class=\"hbgov-article-content\">",
+  "content_end": "<div class=\"hbgov-bfc-block",
+  "title_tag": "<div class=\"hbgov-article-title\">",
+  "clean_rules": {
+    "remove_tags": ["script", "style", "img", "span"],
+    "block_tags": ["p", "br"]
+  },
+  "notes": "正文在 hbgov-article-content（toolbar之后的容器），content_end用 hbgov-bfc-block 避免截断嵌套内容"
+}
